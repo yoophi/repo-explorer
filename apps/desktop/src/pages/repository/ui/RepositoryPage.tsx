@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   BookOpen,
   Check,
@@ -179,137 +180,155 @@ export function RepositoryPage() {
     updateMetadataMutation.error instanceof Error ? updateMetadataMutation.error.message : null;
 
   return (
-    <main className="flex min-h-screen bg-background text-foreground">
-      <aside className="flex w-[420px] flex-col border-r bg-sidebar">
-        <div className="border-b p-4">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <FolderGit2 className="size-4" />
-            Repo Explorer
-          </div>
-
-          <div className="mt-4 grid gap-3">
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="root-path">
-              Directory
-              <div className="flex gap-2">
-                <input
-                  id="root-path"
-                  className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  value={rootPath}
-                  onChange={(event) => setRootPath(event.target.value)}
-                />
-                <Button variant="outline" size="icon" onClick={() => void selectRootDirectory()}>
-                  <FolderGit2 className="size-4" />
-                </Button>
+    <main className="h-screen bg-background text-foreground">
+      <Group className="h-full" id="repository-workspace-layout" orientation="horizontal">
+        <Panel
+          className="min-w-0"
+          defaultSize="420px"
+          groupResizeBehavior="preserve-pixel-size"
+          id="repository-navigation"
+          maxSize="640px"
+          minSize="280px"
+        >
+          <aside className="flex h-full min-h-0 flex-col bg-sidebar">
+            <div className="border-b p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <FolderGit2 className="size-4" />
+                Repo Explorer
               </div>
-            </label>
 
-            <div className="flex items-end gap-2">
-              <label className="grid flex-1 gap-1 text-xs font-medium text-muted-foreground" htmlFor="max-depth">
-                Max depth
-                <input
-                  id="max-depth"
-                  className="h-8 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  min={0}
-                  max={20}
-                  type="number"
-                  value={maxDepth}
-                  onChange={(event) => setMaxDepth(Number(event.target.value))}
-                />
-              </label>
-              <Button disabled={!rootPath || scanMutation.isPending} onClick={() => scanMutation.mutate()}>
-                <Search className="size-4" />
-                Scan
+              <div className="mt-4 grid gap-3">
+                <label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="root-path">
+                  Directory
+                  <div className="flex gap-2">
+                    <input
+                      id="root-path"
+                      className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      value={rootPath}
+                      onChange={(event) => setRootPath(event.target.value)}
+                    />
+                    <Button variant="outline" size="icon" onClick={() => void selectRootDirectory()}>
+                      <FolderGit2 className="size-4" />
+                    </Button>
+                  </div>
+                </label>
+
+                <div className="flex items-end gap-2">
+                  <label className="grid flex-1 gap-1 text-xs font-medium text-muted-foreground" htmlFor="max-depth">
+                    Max depth
+                    <input
+                      id="max-depth"
+                      className="h-8 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      min={0}
+                      max={20}
+                      type="number"
+                      value={maxDepth}
+                      onChange={(event) => setMaxDepth(Number(event.target.value))}
+                    />
+                  </label>
+                  <Button disabled={!rootPath || scanMutation.isPending} onClick={() => scanMutation.mutate()}>
+                    <Search className="size-4" />
+                    Scan
+                  </Button>
+                </div>
+
+                <label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="repo-search">
+                  Search
+                  <input
+                    id="repo-search"
+                    className="h-8 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    placeholder="name, path, tag, origin, README"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                  />
+                </label>
+
+                {scanError ? <div className="text-xs text-red-600">{scanError}</div> : null}
+                {scanProgress ? (
+                  <ScanProgressPanel progress={scanProgress} isScanning={scanMutation.isPending} />
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-b px-4 py-2">
+              <span className="text-xs font-medium text-muted-foreground">
+                {visibleRepositoryIds.size} shown / {repositories.length} repos
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => void repositoriesQuery.refetch()}
+                disabled={repositoriesQuery.isFetching}
+              >
+                <RefreshCw className="size-4" />
               </Button>
             </div>
 
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="repo-search">
-              Search
-              <input
-                id="repo-search"
-                className="h-8 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                placeholder="name, path, tag, origin, README"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-              />
-            </label>
+            {listError ? <div className="p-4 text-xs text-red-600">{listError}</div> : null}
 
-            {scanError ? <div className="text-xs text-red-600">{scanError}</div> : null}
-            {scanProgress ? (
-              <ScanProgressPanel progress={scanProgress} isScanning={scanMutation.isPending} />
-            ) : null}
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between border-b px-4 py-2">
-          <span className="text-xs font-medium text-muted-foreground">
-            {visibleRepositoryIds.size} shown / {repositories.length} repos
-          </span>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => void repositoriesQuery.refetch()}
-            disabled={repositoriesQuery.isFetching}
-          >
-            <RefreshCw className="size-4" />
-          </Button>
-        </div>
-
-        {listError ? <div className="p-4 text-xs text-red-600">{listError}</div> : null}
-
-        <div className="min-h-0 flex-1 overflow-auto">
-          {tree.length > 0 ? (
-            tree.map((node) =>
-              renderRepositoryTreeNode({
-                node,
-                depth: 0,
-                expandedRepositoryIds,
-                selectedRepositoryId,
-                onSelect: setSelectedRepositoryId,
-                onToggle: toggleExpanded,
-              }),
-            )
-          ) : (
-            <div className="p-4 text-sm text-muted-foreground">No repositories found.</div>
-          )}
-        </div>
-      </aside>
-
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 items-center justify-between border-b px-4">
-          <div>
-            <h1 className="text-sm font-semibold">Repository Workspace</h1>
-            <p className="text-xs text-muted-foreground">
-              {appInfoQuery.data
-                ? `${appInfoQuery.data.name} ${appInfoQuery.data.version}`
-                : "Local repository catalog"}
-            </p>
-          </div>
-          <Button variant="outline" size="icon" onClick={() => void appInfoQuery.refetch()}>
-            <RefreshCw className="size-4" />
-          </Button>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-auto p-6">
-          {selectedRepository ? (
-            <RepositoryDetail
-              description={description}
-              pinned={pinned}
-              repository={selectedRepository}
-              tagsText={tagsText}
-              updateError={updateError}
-              updatePending={updateMetadataMutation.isPending}
-              onDescriptionChange={setDescription}
-              onPinnedChange={setPinned}
-              onSave={() => updateMetadataMutation.mutate()}
-              onTagsTextChange={setTagsText}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Scan a directory to build the repository tree.
+            <div className="min-h-0 flex-1 overflow-auto">
+              {tree.length > 0 ? (
+                tree.map((node) =>
+                  renderRepositoryTreeNode({
+                    node,
+                    depth: 0,
+                    expandedRepositoryIds,
+                    selectedRepositoryId,
+                    onSelect: setSelectedRepositoryId,
+                    onToggle: toggleExpanded,
+                  }),
+                )
+              ) : (
+                <div className="p-4 text-sm text-muted-foreground">No repositories found.</div>
+              )}
             </div>
-          )}
-        </div>
-      </section>
+          </aside>
+        </Panel>
+
+        <Separator
+          className="w-1 cursor-col-resize bg-border transition-colors hover:bg-ring"
+          id="repository-layout-resizer"
+        />
+
+        <Panel className="min-w-0" id="repository-detail" minSize="360px">
+          <section className="flex h-full min-h-0 min-w-0 flex-col">
+            <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+              <div>
+                <h1 className="text-sm font-semibold">Repository Workspace</h1>
+                <p className="text-xs text-muted-foreground">
+                  {appInfoQuery.data
+                    ? `${appInfoQuery.data.name} ${appInfoQuery.data.version}`
+                    : "Local repository catalog"}
+                </p>
+              </div>
+              <Button variant="outline" size="icon" onClick={() => void appInfoQuery.refetch()}>
+                <RefreshCw className="size-4" />
+              </Button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-auto p-6">
+              {selectedRepository ? (
+                <RepositoryDetail
+                  description={description}
+                  pinned={pinned}
+                  repository={selectedRepository}
+                  tagsText={tagsText}
+                  updateError={updateError}
+                  updatePending={updateMetadataMutation.isPending}
+                  onDescriptionChange={setDescription}
+                  onPinnedChange={setPinned}
+                  onSave={() => updateMetadataMutation.mutate()}
+                  onTagsTextChange={setTagsText}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Scan a directory to build the repository tree.
+                </div>
+              )}
+            </div>
+          </section>
+        </Panel>
+      </Group>
     </main>
   );
 }
