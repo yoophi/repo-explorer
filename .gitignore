@@ -1,0 +1,11 @@
+target
+node_modules
+dist
+dist-ssr
+storybook-static
+*.local
+
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
