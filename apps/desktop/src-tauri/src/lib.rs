@@ -9,6 +9,7 @@ use tauri::{Emitter, Manager};
 
 const METADATA_FILE_NAME: &str = ".repo-explorer.json";
 const SCAN_PROGRESS_EVENT: &str = "repository_scan_progress";
+const REPOSITORY_SCANNED_EVENT: &str = "repository_scanned";
 
 #[derive(Serialize)]
 struct AppInfo {
@@ -30,6 +31,22 @@ struct UpdateRepositoryMetadataRequest {
     description: String,
     tags: Vec<String>,
     pinned: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenRepositoryInTerminalRequest {
+    repository_id: String,
+    terminal_app: TerminalApp,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum TerminalApp {
+    Terminal,
+    Iterm2,
+    Ghostty,
+    Wezterm,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -65,10 +82,20 @@ struct RepositoryRecord {
     parent_id: Option<String>,
     is_worktree: bool,
     origin_url: Option<String>,
+    git_status: GitStatusSummary,
     readme: Option<ReadmeContent>,
     metadata: RepositoryMetadata,
     metadata_path: String,
     last_seen_at: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitStatusSummary {
+    uncommitted_changes: usize,
+    ahead: usize,
+    behind: usize,
+    has_upstream: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,6 +111,7 @@ struct RepositoryInspection {
     git_dir: Option<PathBuf>,
     common_git_dir: Option<PathBuf>,
     origin_url: Option<String>,
+    git_status: GitStatusSummary,
     readme: Option<ReadmeContent>,
     metadata: RepositoryMetadata,
 }
@@ -145,11 +173,17 @@ async fn scan_repositories(
         merge_repository_paths(&mut store, discovered_paths);
         save_catalog_store(&app_for_scan, &store).map_err(|error| error.to_string())?;
 
-        let repositories =
-            repositories_from_paths_with_progress(discovered_repository_paths, now, |progress| {
+        let repositories = repositories_from_paths_with_progress_and_records(
+            discovered_repository_paths,
+            now,
+            |progress| {
                 emit_scan_progress(&app_for_scan, progress);
-            })
-            .map_err(|error| error.to_string())?;
+            },
+            |repository| {
+                emit_repository_scanned(&app_for_scan, repository);
+            },
+        )
+        .map_err(|error| error.to_string())?;
 
         emit_scan_progress(
             &app_for_scan,
@@ -201,6 +235,20 @@ fn update_repository_metadata(
         .ok_or_else(|| format!("Repository not found: {}", request.repository_id))
 }
 
+#[tauri::command]
+fn open_repository_in_terminal(request: OpenRepositoryInTerminalRequest) -> Result<(), String> {
+    let repository_path =
+        normalize_path(&request.repository_id).map_err(|error| error.to_string())?;
+    if !is_git_repository(&repository_path) {
+        return Err(format!(
+            "Path is not a git repository: {}",
+            repository_path.display()
+        ));
+    }
+
+    open_terminal_at_path(&repository_path, request.terminal_app)
+}
+
 fn repositories_from_paths(
     paths: Vec<String>,
     last_seen_at: u64,
@@ -213,48 +261,60 @@ fn repositories_from_paths_with_progress(
     last_seen_at: u64,
     mut on_progress: impl FnMut(RepositoryScanProgress),
 ) -> io::Result<Vec<RepositoryRecord>> {
+    repositories_from_paths_with_progress_and_records(paths, last_seen_at, &mut on_progress, |_| {})
+}
+
+fn repositories_from_paths_with_progress_and_records(
+    paths: Vec<String>,
+    last_seen_at: u64,
+    mut on_progress: impl FnMut(RepositoryScanProgress),
+    mut on_repository: impl FnMut(RepositoryRecord),
+) -> io::Result<Vec<RepositoryRecord>> {
     let inspections = inspect_repositories_with_progress(paths, &mut on_progress)?;
     let parent_ids = worktree_parent_ids(&inspections);
-    let mut repositories = inspections
-        .into_iter()
-        .map(|inspection| {
-            let path_string = inspection.path.to_string_lossy().to_string();
-            let parent_id = parent_ids.get(&path_string).cloned();
-            let name = inspection
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("repository")
-                .to_string();
-            let relative_path = shortest_relative_path(&inspection.path);
-            let is_worktree = parent_id.is_some()
-                || inspection
-                    .git_dir
-                    .as_ref()
-                    .zip(inspection.common_git_dir.as_ref())
-                    .map(|(git_dir, common_git_dir)| git_dir != common_git_dir)
-                    .unwrap_or(false);
-            let metadata_path = inspection
-                .path
-                .join(METADATA_FILE_NAME)
-                .to_string_lossy()
-                .to_string();
+    let mut repositories = Vec::new();
 
-            RepositoryRecord {
-                id: path_string.clone(),
-                name,
-                path: path_string,
-                relative_path,
-                parent_id,
-                is_worktree,
-                origin_url: inspection.origin_url,
-                readme: inspection.readme,
-                metadata: inspection.metadata,
-                metadata_path,
-                last_seen_at,
-            }
-        })
-        .collect::<Vec<_>>();
+    for inspection in inspections {
+        let path_string = inspection.path.to_string_lossy().to_string();
+        let parent_id = parent_ids.get(&path_string).cloned();
+        let name = inspection
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("repository")
+            .to_string();
+        let relative_path = shortest_relative_path(&inspection.path);
+        let is_worktree = parent_id.is_some()
+            || inspection
+                .git_dir
+                .as_ref()
+                .zip(inspection.common_git_dir.as_ref())
+                .map(|(git_dir, common_git_dir)| git_dir != common_git_dir)
+                .unwrap_or(false);
+        let metadata_path = inspection
+            .path
+            .join(METADATA_FILE_NAME)
+            .to_string_lossy()
+            .to_string();
+
+        let repository = RepositoryRecord {
+            id: path_string.clone(),
+            name,
+            path: path_string,
+            relative_path,
+            parent_id,
+            is_worktree,
+            origin_url: inspection.origin_url,
+            git_status: inspection.git_status,
+            readme: inspection.readme,
+            metadata: inspection.metadata,
+            metadata_path,
+            last_seen_at,
+        };
+
+        on_repository(repository.clone());
+        repositories.push(repository);
+    }
 
     sort_repositories(&mut repositories);
     Ok(repositories)
@@ -293,6 +353,7 @@ fn inspect_repositories_with_progress(
             git_dir: git_path(&repository_path, "--git-dir"),
             common_git_dir: git_path(&repository_path, "--git-common-dir"),
             origin_url: git_output(&repository_path, ["config", "--get", "remote.origin.url"]),
+            git_status: git_status_summary(&repository_path),
             readme: read_readme(&repository_path)?,
             metadata: load_repository_metadata(&repository_path)?,
             path: repository_path,
@@ -372,6 +433,10 @@ fn emit_scan_progress(app: &tauri::AppHandle, progress: RepositoryScanProgress) 
     let _ = app.emit(SCAN_PROGRESS_EVENT, progress);
 }
 
+fn emit_repository_scanned(app: &tauri::AppHandle, repository: RepositoryRecord) {
+    let _ = app.emit(REPOSITORY_SCANNED_EVENT, repository);
+}
+
 fn worktree_parent_ids(inspections: &[RepositoryInspection]) -> HashMap<String, String> {
     let mut main_repositories_by_common_git_dir = HashMap::new();
 
@@ -439,6 +504,62 @@ fn git_output<const N: usize>(repository_path: &Path, args: [&str; N]) -> Option
     } else {
         Some(value)
     }
+}
+
+fn git_status_summary(repository_path: &Path) -> GitStatusSummary {
+    let uncommitted_changes = git_output(
+        repository_path,
+        ["status", "--porcelain=v1", "--untracked-files=normal"],
+    )
+    .map(|status| {
+        status
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+    })
+    .unwrap_or_default();
+
+    let Some(upstream) = git_output(
+        repository_path,
+        [
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    ) else {
+        return GitStatusSummary {
+            uncommitted_changes,
+            ..GitStatusSummary::default()
+        };
+    };
+
+    let Some((behind, ahead)) = git_output(
+        repository_path,
+        ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+    )
+    .and_then(|output| parse_ahead_behind_counts(&output)) else {
+        return GitStatusSummary {
+            uncommitted_changes,
+            has_upstream: true,
+            ..GitStatusSummary::default()
+        };
+    };
+
+    GitStatusSummary {
+        uncommitted_changes,
+        ahead,
+        behind,
+        has_upstream: !upstream.is_empty(),
+    }
+}
+
+fn parse_ahead_behind_counts(output: &str) -> Option<(usize, usize)> {
+    let mut counts = output.split_whitespace();
+    let behind = counts.next()?.parse().ok()?;
+    let ahead = counts.next()?.parse().ok()?;
+
+    Some((behind, ahead))
 }
 
 fn read_readme(repository_path: &Path) -> io::Result<Option<ReadmeContent>> {
@@ -634,6 +755,34 @@ fn sort_repositories(repositories: &mut [RepositoryRecord]) {
     });
 }
 
+#[cfg(target_os = "macos")]
+fn open_terminal_at_path(path: &Path, terminal_app: TerminalApp) -> Result<(), String> {
+    let app_name = match terminal_app {
+        TerminalApp::Terminal => "Terminal",
+        TerminalApp::Iterm2 => "iTerm",
+        TerminalApp::Ghostty => "Ghostty",
+        TerminalApp::Wezterm => "WezTerm",
+    };
+
+    let status = Command::new("open")
+        .arg("-a")
+        .arg(app_name)
+        .arg(path)
+        .status()
+        .map_err(|error| format!("Failed to open {app_name}: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to open {app_name}: {status}"))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn open_terminal_at_path(_path: &Path, _terminal_app: TerminalApp) -> Result<(), String> {
+    Err("Opening a selected terminal app is only supported on macOS.".into())
+}
+
 fn normalize_tags(tags: Vec<String>) -> Vec<String> {
     let mut tags = tags
         .into_iter()
@@ -662,6 +811,7 @@ pub fn run() {
             app_info,
             list_repositories,
             scan_repositories,
+            open_repository_in_terminal,
             update_repository_metadata
         ])
         .run(tauri::generate_context!())
@@ -737,6 +887,34 @@ mod tests {
 
         assert!(readme.path.ends_with("README.md"));
         assert_eq!(readme.content, "# Repo\n\nDetails");
+    }
+
+    #[test]
+    fn summarizes_uncommitted_git_changes() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let repository = temp_dir.path().join("repo");
+
+        run_git(temp_dir.path(), ["init", "repo"]);
+        run_git(&repository, ["config", "user.email", "test@example.com"]);
+        run_git(&repository, ["config", "user.name", "Test User"]);
+        fs::write(repository.join("README.md"), "# Repo").expect("write readme");
+        run_git(&repository, ["add", "README.md"]);
+        run_git(&repository, ["commit", "-m", "initial"]);
+
+        fs::write(repository.join("README.md"), "# Repo\n\nChanged").expect("modify readme");
+        fs::write(
+            repository.join("repo-explorer-status-fixture.txt"),
+            "fixture",
+        )
+        .expect("write fixture");
+        run_git(&repository, ["add", "repo-explorer-status-fixture.txt"]);
+
+        let status = git_status_summary(&repository);
+
+        assert_eq!(status.uncommitted_changes, 2);
+        assert_eq!(status.ahead, 0);
+        assert_eq!(status.behind, 0);
+        assert!(!status.has_upstream);
     }
 
     #[test]
