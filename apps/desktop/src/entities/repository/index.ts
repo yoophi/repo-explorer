@@ -1,11 +1,16 @@
 export {
   getAppInfo,
   listRepositories,
+  openRepositoryInFinder,
+  openRepositoryInTerminal,
   scanRepositories,
   updateRepositoryMetadata,
   type AppInfo,
+  type GitStatusSummary,
+  type OpenRepositoryInTerminalRequest,
   type RepositoryScanProgress,
   type RepositoryRecord,
   type ScanRepositoriesRequest,
+  type TerminalApp,
   type UpdateRepositoryMetadataRequest,
 } from "./api";

@@ -44,3 +44,8 @@
 - 새로운 React 컴포넌트를 생성할 때는 Storybook에 등록한다.
 - Storybook에 컴포넌트를 추가할 때는 컴포넌트가 처리하는 데이터의 종류와 상태를 알기 쉽도록 다양한 샘플을 포함한다.
   - 예: empty/loading/error, 긴 경로/긴 이름, 추가/수정/삭제/이름 변경 상태, 로컬/원격 브랜치, main/linked worktree.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
