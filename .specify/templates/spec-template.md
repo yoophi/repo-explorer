@@ -74,6 +74,9 @@
 
 - What happens when [boundary condition]?
 - How does system handle [error scenario]?
+- If this feature performs a desktop action, what happens when the path
+  contains spaces, Korean text, or special characters?
+- If this feature changes persisted data, how are older JSON files handled?
 
 ## Requirements *(mandatory)*
 
@@ -89,16 +92,28 @@
 - **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
 - **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
 - **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-006**: System MUST provide visible success or failure feedback for
+  user-visible desktop actions.
 
 *Example of marking unclear requirements:*
 
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
+- **FR-007**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
+- **FR-008**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
 ### Key Entities *(include if feature involves data)*
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]
 - **[Entity 2]**: [What it represents, relationships to other entities]
+
+### Constitution-Relevant Scope *(include if applicable)*
+
+- **Rust Boundary Impact**: [Domain/application/adapter boundaries affected, or N/A]
+- **React Layer Impact**: [app/pages/widgets/features/entities/shared/packages/ui layers affected, or N/A]
+- **State Ownership**: [React Query/Zustand/local ownership for new state, or N/A]
+- **Persistence Impact**: [JSON schema compatibility or migration need, or N/A]
+- **Desktop Action Feedback**: [Success/failure states users will see, or N/A]
+- **Storybook Coverage**: [New stories and states expected, or N/A]
+- **Documentation Impact**: [docs/*.md updates and Mermaid needs, or N/A]
 
 ## Success Criteria *(mandatory)*
 

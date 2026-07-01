@@ -31,7 +31,28 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Document PASS/FAIL for each gate. Any FAIL requires an entry in Complexity
+Tracking with an exception reason and follow-up remediation.
+
+- **Hexagonal Rust Boundaries**: Domain logic is free of Tauri, filesystem,
+  git CLI, OS API, and JSON file format dependencies; external access is
+  behind application ports and outbound adapters.
+- **Feature-Sliced React Structure**: Planned React files stay within
+  `app`, `pages`, `widgets`, `features`, `entities`, `shared`, or
+  `packages/ui` responsibilities.
+- **Explicit State Ownership**: React Query owns server/async/cache state;
+  Zustand or an explicitly named store owns client-global/session state;
+  local state remains component-local.
+- **JSON Persistence Behind Ports**: Single JSON file persistence remains
+  isolated in Rust outbound adapters; schema changes include migration or
+  backward-compatible handling.
+- **Safe and Observable Desktop Actions**: Filesystem, git, launch, and
+  clipboard actions provide visible success/failure feedback and handle spaces,
+  Korean text, and special characters in paths.
+- **Storybook-Backed UI Changes**: New components or meaningful UI states have
+  Storybook coverage in the appropriate atomic design category.
+- **Korean Documentation with Visual Flows**: `docs/*.md` files use English
+  kebab-case filenames, Korean body text, and Mermaid diagrams for flows.
 
 ## Project Structure
 
@@ -56,39 +77,23 @@ specs/[###-feature]/
 -->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
-├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
+apps/desktop/
+├── src/                    # React app using feature sliced design
+│   ├── app/
 │   ├── pages/
-│   └── services/
-└── tests/
+│   ├── widgets/
+│   ├── features/
+│   ├── entities/
+│   └── shared/
+└── src-tauri/src/          # Rust hexagonal architecture
+    ├── domain/
+    ├── application/
+    ├── ports/
+    └── adapters/
 
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+packages/ui/                # Shared UI primitives
+docs/                       # Korean documentation, English kebab-case names
+specs/[###-feature]/        # Spec Kit artifacts for this feature
 ```
 
 **Structure Decision**: [Document the selected structure and reference the real

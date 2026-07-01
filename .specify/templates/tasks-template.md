@@ -20,10 +20,11 @@ description: "Task list template for feature implementation"
 
 ## Path Conventions
 
-- **Single project**: `src/`, `tests/` at repository root
-- **Web app**: `backend/src/`, `frontend/src/`
-- **Mobile**: `api/src/`, `ios/src/` or `android/src/`
-- Paths shown below assume single project - adjust based on plan.md structure
+- **React desktop UI**: `apps/desktop/src/{app,pages,widgets,features,entities,shared}/`
+- **Tauri/Rust core**: `apps/desktop/src-tauri/src/{domain,application,ports,adapters}/`
+- **Shared UI primitives**: `packages/ui/`
+- **Documentation**: `docs/` with English kebab-case filenames and Korean body text
+- Paths shown below are examples - adjust based on plan.md structure
 
 <!-- 
   ============================================================================
@@ -62,12 +63,12 @@ description: "Task list template for feature implementation"
 
 Examples of foundational tasks (adjust based on your project):
 
-- [ ] T004 Setup database schema and migrations framework
-- [ ] T005 [P] Implement authentication/authorization framework
-- [ ] T006 [P] Setup API routing and middleware structure
-- [ ] T007 Create base models/entities that all stories depend on
-- [ ] T008 Configure error handling and logging infrastructure
-- [ ] T009 Setup environment configuration management
+- [ ] T004 Define Rust application ports and outbound adapter boundaries
+- [ ] T005 [P] Define domain entities/value objects independent of Tauri and OS APIs
+- [ ] T006 [P] Define React Query keys/API contracts in entities layer
+- [ ] T007 Define Zustand/client state ownership for selected/session UI state
+- [ ] T008 Implement safe error mapping for user-visible desktop actions
+- [ ] T009 Define JSON persistence compatibility or migration handling if storage changes
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -92,8 +93,8 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
 - [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
 - [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
-- [ ] T016 [US1] Add validation and error handling
-- [ ] T017 [US1] Add logging for user story 1 operations
+- [ ] T016 [US1] Add validation and user-visible error handling
+- [ ] T017 [US1] Add Storybook coverage for new UI states
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -151,10 +152,12 @@ Examples of foundational tasks (adjust based on your project):
 **Purpose**: Improvements that affect multiple user stories
 
 - [ ] TXXX [P] Documentation updates in docs/
+- [ ] TXXX [P] Storybook stories for empty/loading/error/long text/pending/success/failure states
 - [ ] TXXX Code cleanup and refactoring
 - [ ] TXXX Performance optimization across all stories
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
 - [ ] TXXX Security hardening
+- [ ] TXXX Run required quality gates: pnpm typecheck, Rust tests, Storybook/build, quickstart validation as applicable
 - [ ] TXXX Run quickstart.md validation
 
 ---

@@ -6,6 +6,7 @@ import {
   BookOpen,
   Check,
   ChevronRight,
+  Copy,
   FileJson,
   FolderOpen,
   FolderGit2,
@@ -58,6 +59,8 @@ export function RepositoryPage() {
   const [scanProgress, setScanProgress] = useState<RepositoryScanProgress | null>(null);
   const [repositoryActionError, setRepositoryActionError] = useState<string | null>(null);
   const [repositoryActionPending, setRepositoryActionPending] = useState<string | null>(null);
+  const [repositoryCopyMessage, setRepositoryCopyMessage] = useState<string | null>(null);
+  const [repositoryCopyError, setRepositoryCopyError] = useState<string | null>(null);
   const [scannedRepositoryIds, setScannedRepositoryIds] = useState<Set<string> | null>(null);
 
   const appInfoQuery = useQuery({
@@ -186,6 +189,8 @@ export function RepositoryPage() {
   useEffect(() => {
     setRepositoryActionError(null);
     setRepositoryActionPending(null);
+    setRepositoryCopyMessage(null);
+    setRepositoryCopyError(null);
   }, [selectedRepositoryId]);
 
   useEffect(() => {
@@ -253,6 +258,23 @@ export function RepositoryPage() {
       setRepositoryActionError(error instanceof Error ? error.message : String(error));
     } finally {
       setRepositoryActionPending(null);
+    }
+  }
+
+  async function handleCopyRepositoryPath(repository: RepositoryRecord) {
+    setRepositoryCopyMessage(null);
+    setRepositoryCopyError(null);
+
+    try {
+      await copyTextToClipboard(repository.path);
+      setRepositoryCopyMessage("디렉토리 경로를 클립보드에 복사했습니다.");
+      window.setTimeout(() => {
+        setRepositoryCopyMessage(null);
+      }, 2000);
+    } catch (error) {
+      setRepositoryCopyError(
+        error instanceof Error ? error.message : "디렉토리 경로를 복사하지 못했습니다.",
+      );
     }
   }
 
@@ -407,6 +429,8 @@ export function RepositoryPage() {
                 <RepositoryDetail
                   actionError={repositoryActionError}
                   actionPending={repositoryActionPending}
+                  copyError={repositoryCopyError}
+                  copyMessage={repositoryCopyMessage}
                   description={description}
                   pinned={pinned}
                   repository={selectedRepository}
@@ -414,6 +438,7 @@ export function RepositoryPage() {
                   updateError={updateError}
                   updatePending={updateMetadataMutation.isPending}
                   onDescriptionChange={setDescription}
+                  onCopyPath={handleCopyRepositoryPath}
                   onOpenFinder={handleOpenRepositoryInFinder}
                   onOpenTerminal={handleOpenRepositoryInTerminal}
                   onPinnedChange={setPinned}
@@ -463,6 +488,8 @@ function ScanProgressPanel({
 function RepositoryDetail({
   actionError,
   actionPending,
+  copyError,
+  copyMessage,
   description,
   pinned,
   repository,
@@ -470,6 +497,7 @@ function RepositoryDetail({
   updateError,
   updatePending,
   onDescriptionChange,
+  onCopyPath,
   onOpenFinder,
   onOpenTerminal,
   onPinnedChange,
@@ -478,6 +506,8 @@ function RepositoryDetail({
 }: {
   actionError: string | null;
   actionPending: string | null;
+  copyError: string | null;
+  copyMessage: string | null;
   description: string;
   pinned: boolean;
   repository: RepositoryRecord;
@@ -485,6 +515,7 @@ function RepositoryDetail({
   updateError: string | null;
   updatePending: boolean;
   onDescriptionChange: (description: string) => void;
+  onCopyPath: (repository: RepositoryRecord) => Promise<void>;
   onOpenFinder: (repository: RepositoryRecord) => Promise<void>;
   onOpenTerminal: (repository: RepositoryRecord, terminalApp: TerminalApp) => Promise<void>;
   onPinnedChange: (pinned: boolean) => void;
@@ -560,7 +591,20 @@ function RepositoryDetail({
             ) : null}
           </div>
         </div>
-        <div className="mt-1 break-all text-sm text-muted-foreground">{repository.path}</div>
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1 break-all text-sm text-muted-foreground">{repository.path}</div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void onCopyPath(repository)}
+            aria-label="디렉토리 절대 경로 복사"
+          >
+            <Copy className="size-4" />
+            경로 복사
+          </Button>
+        </div>
+        {copyMessage ? <div className="mt-2 text-xs text-emerald-600">{copyMessage}</div> : null}
+        {copyError ? <div className="mt-2 text-xs text-red-600">{copyError}</div> : null}
         {repository.originUrl ? (
           <div className="mt-2 flex items-center gap-2 break-all text-sm">
             <GitBranch className="size-4 shrink-0" />
@@ -822,6 +866,29 @@ function upsertRepository(repositories: RepositoryRecord[], repository: Reposito
   }
 
   return repositories.map((currentRepository, index) => (index === repositoryIndex ? repository : currentRepository));
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("디렉토리 경로를 복사하지 못했습니다.");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function sortTreeNodes(nodes: RepositoryTreeNode[]) {
