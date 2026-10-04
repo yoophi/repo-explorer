@@ -1,17 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   BookOpen,
   Check,
   ChevronRight,
   X,
+  Copy,
   FileJson,
+  FolderOpen,
   FolderGit2,
   GitBranch,
+  MoreHorizontal,
   Pin,
   RefreshCw,
   Search,
+  SquareTerminal,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "@yoophi/settings-core/react";
@@ -32,6 +37,8 @@ import {
   displayedRepositories,
   discardPreview,
   listRepositories,
+  openRepositoryInFinder,
+  openRepositoryInTerminal,
   scanRepositories,
   updateRepositoryMetadata,
   type RepositoryRecord,
@@ -39,12 +46,21 @@ import {
   type RepositoryScanItem,
   type RepositoryScanTerminal,
   type ScanViewStatus,
+  type TerminalApp,
 } from "@/entities/repository";
 
 type RepositoryTreeNode = {
   repository: RepositoryRecord;
   children: RepositoryTreeNode[];
 };
+
+const terminalOptions: { app: TerminalApp; label: string }[] = [
+  { app: "terminal", label: "Terminal" },
+  { app: "iterm2", label: "iTerm2" },
+  { app: "ghostty", label: "Ghostty" },
+  { app: "wezterm", label: "WezTerm" },
+];
+
 
 export function RepositoryPage() {
   const queryClient = useQueryClient();
@@ -68,6 +84,10 @@ export function RepositoryPage() {
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [listenerReady, setListenerReady] = useState(false);
   const scanSessionRef = useRef<ScanSession | null>(null);
+  const [repositoryActionError, setRepositoryActionError] = useState<string | null>(null);
+  const [repositoryActionPending, setRepositoryActionPending] = useState<string | null>(null);
+  const [repositoryCopyMessage, setRepositoryCopyMessage] = useState<string | null>(null);
+  const [repositoryCopyError, setRepositoryCopyError] = useState<string | null>(null);
 
   const appInfoQuery = useQuery({
     queryKey: ["app-info"],
@@ -253,6 +273,13 @@ export function RepositoryPage() {
   }, [repositories, selectedRepository]);
 
   useEffect(() => {
+    setRepositoryActionError(null);
+    setRepositoryActionPending(null);
+    setRepositoryCopyMessage(null);
+    setRepositoryCopyError(null);
+  }, [selectedRepositoryId]);
+
+  useEffect(() => {
     if (!selectedRepositoryId || visibleRepositoryIds.has(selectedRepositoryId)) {
       return;
     }
@@ -291,6 +318,52 @@ export function RepositoryPage() {
     }
   }
 
+  async function handleOpenRepositoryInFinder(repository: RepositoryRecord) {
+    setRepositoryActionPending("finder");
+    setRepositoryActionError(null);
+
+    try {
+      await openRepositoryInFinder(repository);
+    } catch (error) {
+      setRepositoryActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRepositoryActionPending(null);
+    }
+  }
+
+  async function handleOpenRepositoryInTerminal(repository: RepositoryRecord, terminalApp: TerminalApp) {
+    setRepositoryActionPending(terminalApp);
+    setRepositoryActionError(null);
+
+    try {
+      await openRepositoryInTerminal({
+        repositoryId: repository.id,
+        terminalApp,
+      });
+    } catch (error) {
+      setRepositoryActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRepositoryActionPending(null);
+    }
+  }
+
+  async function handleCopyRepositoryPath(repository: RepositoryRecord) {
+    setRepositoryCopyMessage(null);
+    setRepositoryCopyError(null);
+
+    try {
+      await copyTextToClipboard(repository.path);
+      setRepositoryCopyMessage("디렉토리 경로를 클립보드에 복사했습니다.");
+      window.setTimeout(() => {
+        setRepositoryCopyMessage(null);
+      }, 2000);
+    } catch (error) {
+      setRepositoryCopyError(
+        error instanceof Error ? error.message : "디렉토리 경로를 복사하지 못했습니다.",
+      );
+    }
+  }
+
   function toggleExpanded(repositoryId: string) {
     setExpandedRepositoryIds((currentIds) => {
       const nextIds = new Set(currentIds);
@@ -310,8 +383,10 @@ export function RepositoryPage() {
     updateMetadataMutation.error instanceof Error ? updateMetadataMutation.error.message : null;
 
   return (
-    <main className="flex min-h-screen bg-background text-foreground">
-      <aside className="flex w-[420px] flex-col border-r bg-sidebar">
+    <main className="h-screen bg-background text-foreground">
+      <Group className="h-full" id="repository-workspace-layout" orientation="horizontal">
+        <Panel className="min-w-0" defaultSize="420px" groupResizeBehavior="preserve-pixel-size" id="repository-navigation" maxSize="640px" minSize="280px">
+      <aside className="flex h-full min-h-0 flex-col bg-sidebar">
         <div className="border-b p-4">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <FolderGit2 className="size-4" />
@@ -432,8 +507,10 @@ export function RepositoryPage() {
           )}
         </div>
       </aside>
-
-      <section className="flex min-w-0 flex-1 flex-col">
+      </Panel>
+      <Separator className="w-1 cursor-col-resize bg-border transition-colors hover:bg-ring" id="repository-layout-resizer" />
+      <Panel className="min-w-0" id="repository-detail" minSize="360px">
+      <section className="flex h-full min-h-0 min-w-0 flex-col">
         <header className="flex h-12 items-center justify-between border-b px-4">
           <div>
             <h1 className="text-sm font-semibold">Repository Workspace</h1>
@@ -451,6 +528,13 @@ export function RepositoryPage() {
         <div className="min-h-0 flex-1 overflow-auto p-6">
           {selectedRepository ? (
             <RepositoryDetail
+              actionError={repositoryActionError}
+              actionPending={repositoryActionPending}
+              copyError={repositoryCopyError}
+              copyMessage={repositoryCopyMessage}
+              onCopyPath={handleCopyRepositoryPath}
+              onOpenFinder={handleOpenRepositoryInFinder}
+              onOpenTerminal={handleOpenRepositoryInTerminal}
               description={description}
               pinned={pinned}
               repository={selectedRepository}
@@ -470,6 +554,8 @@ export function RepositoryPage() {
           )}
         </div>
       </section>
+      </Panel>
+      </Group>
     </main>
   );
 }
@@ -504,6 +590,10 @@ function ScanProgressPanel({
 }
 
 function RepositoryDetail({
+  actionError,
+  actionPending,
+  copyError,
+  copyMessage,
   description,
   pinned,
   repository,
@@ -512,10 +602,17 @@ function RepositoryDetail({
   updatePending,
   preview,
   onDescriptionChange,
+  onCopyPath,
+  onOpenFinder,
+  onOpenTerminal,
   onPinnedChange,
   onSave,
   onTagsTextChange,
 }: {
+  actionError: string | null;
+  actionPending: string | null;
+  copyError: string | null;
+  copyMessage: string | null;
   description: string;
   pinned: boolean;
   repository: RepositoryRecord;
@@ -524,21 +621,96 @@ function RepositoryDetail({
   updatePending: boolean;
   preview: boolean;
   onDescriptionChange: (description: string) => void;
+  onCopyPath: (repository: RepositoryRecord) => Promise<void>;
+  onOpenFinder: (repository: RepositoryRecord) => Promise<void>;
+  onOpenTerminal: (repository: RepositoryRecord, terminalApp: TerminalApp) => Promise<void>;
   onPinnedChange: (pinned: boolean) => void;
   onSave: () => void;
   onTagsTextChange: (tagsText: string) => void;
 }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
+
+  async function runRepositoryAction(action: () => Promise<void>) {
+    setActionsOpen(false);
+    await action();
+  }
+
   return (
     <div className="grid max-w-5xl gap-5">
       <div>
-        <div className="flex items-center gap-2">
-          <h2 className="truncate text-xl font-semibold">{repository.name}</h2>
-          {repository.metadata.pinned ? <Pin className="size-4" /> : null}
-          {repository.isWorktree ? (
-            <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-xs">worktree</span>
-          ) : null}
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate text-xl font-semibold">{repository.name}</h2>
+              {repository.metadata.pinned ? <Pin className="size-4 shrink-0" /> : null}
+              {repository.isWorktree ? (
+                <span className="shrink-0 rounded-sm bg-secondary px-1.5 py-0.5 text-xs">worktree</span>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="relative shrink-0">
+            <Button
+              aria-expanded={actionsOpen}
+              aria-haspopup="menu"
+              variant="outline"
+              size="icon-sm"
+              onClick={() => setActionsOpen((current) => !current)}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+
+            {actionsOpen ? (
+              <div
+                className="absolute right-0 top-9 z-10 w-52 overflow-hidden rounded-md border bg-card p-1 text-sm shadow-lg"
+                role="menu"
+              >
+                <button
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50"
+                  disabled={actionPending !== null}
+                  role="menuitem"
+                  type="button"
+                  onClick={() => void runRepositoryAction(() => onOpenFinder(repository))}
+                >
+                  <FolderOpen className="size-4" />
+                  Finder로 열기
+                </button>
+
+                <div className="my-1 border-t" />
+                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">터미널로 열기</div>
+                {terminalOptions.map((option) => (
+                  <button
+                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-muted disabled:opacity-50"
+                    disabled={actionPending !== null}
+                    key={option.app}
+                    role="menuitem"
+                    type="button"
+                    onClick={() =>
+                      void runRepositoryAction(() => onOpenTerminal(repository, option.app))
+                    }
+                  >
+                    <SquareTerminal className="size-4" />
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
-        <div className="mt-1 break-all text-sm text-muted-foreground">{repository.path}</div>
+        <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1 break-all text-sm text-muted-foreground">{repository.path}</div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void onCopyPath(repository)}
+            aria-label="디렉토리 절대 경로 복사"
+          >
+            <Copy className="size-4" />
+            경로 복사
+          </Button>
+        </div>
+        {copyMessage ? <div className="mt-2 text-xs text-emerald-600">{copyMessage}</div> : null}
+        {copyError ? <div className="mt-2 text-xs text-red-600">{copyError}</div> : null}
         {preview ? <div className="mt-2 text-xs text-muted-foreground">Scan preview · metadata editing is available after completion.</div> : null}
         {repository.originUrl ? (
           <div className="mt-2 flex items-center gap-2 break-all text-sm">
@@ -548,6 +720,7 @@ function RepositoryDetail({
         ) : (
           <div className="mt-2 text-sm text-muted-foreground">No git origin configured.</div>
         )}
+        {actionError ? <div className="mt-2 text-xs text-red-600">{actionError}</div> : null}
       </div>
 
       <div className="grid gap-4 rounded-md border bg-card p-4">
@@ -642,6 +815,9 @@ function renderRepositoryTreeNode({
   const isSelected = repository.id === selectedRepositoryId;
   const isExpanded = expandedRepositoryIds.has(repository.id);
   const hasChildren = node.children.length > 0;
+  const linkedWorktreeCount = node.children.filter(
+    (childNode) => childNode.repository.isWorktree && childNode.repository.parentId === repository.id,
+  ).length;
 
   return (
     <div key={repository.id}>
@@ -663,9 +839,41 @@ function renderRepositoryTreeNode({
         </button>
         <button className="min-w-0 flex-1 text-left" type="button" onClick={() => onSelect(repository.id)}>
           <div className="flex min-w-0 items-center gap-2">
-            {repository.metadata.pinned ? <Pin className="size-3.5 shrink-0" /> : null}
-            {repository.isWorktree ? <GitBranch className="size-3.5 shrink-0" /> : null}
-            <span className="truncate font-medium">{repository.name}</span>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              {repository.metadata.pinned ? <Pin className="size-3.5 shrink-0" /> : null}
+              {repository.isWorktree ? <GitBranch className="size-3.5 shrink-0" /> : null}
+              <span className="truncate font-medium">{repository.name}</span>
+            </div>
+            {linkedWorktreeCount > 0 ? (
+              <span className="shrink-0 rounded-sm bg-secondary px-1.5 py-0.5 text-[11px] text-secondary-foreground">
+                worktree {linkedWorktreeCount}
+              </span>
+            ) : null}
+            {repository.isWorktree ? (
+              <span className="shrink-0 rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                link
+              </span>
+            ) : null}
+            {repository.originUrl ? (
+              <span className="shrink-0 rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                origin
+              </span>
+            ) : null}
+            {repository.gitStatus.uncommittedChanges > 0 ? (
+              <span className="shrink-0 rounded-sm border border-amber-300/70 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800">
+                dirty {repository.gitStatus.uncommittedChanges}
+              </span>
+            ) : null}
+            {repository.gitStatus.ahead > 0 ? (
+              <span className="shrink-0 rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                ahead {repository.gitStatus.ahead}
+              </span>
+            ) : null}
+            {repository.gitStatus.behind > 0 ? (
+              <span className="shrink-0 rounded-sm border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                behind {repository.gitStatus.behind}
+              </span>
+            ) : null}
           </div>
           <div className="mt-1 truncate text-xs text-muted-foreground">{repository.relativePath}</div>
           {repository.originUrl ? (
@@ -782,4 +990,27 @@ function collectTreeIds(nodes: RepositoryTreeNode[]) {
 
   nodes.forEach(visit);
   return ids;
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("디렉토리 경로를 복사하지 못했습니다.");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }

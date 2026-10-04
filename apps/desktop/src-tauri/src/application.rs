@@ -299,6 +299,7 @@ mod tests {
             parent_id: None,
             is_worktree: false,
             origin_url: None,
+            git_status: Default::default(),
             readme: None,
             metadata: RepositoryMetadata::default(),
             metadata_path: "/fake/repo/.repo-explorer.json".into(),
@@ -510,4 +511,22 @@ mod tests {
         );
         assert!(catalog.load().unwrap().repository_paths.is_empty());
     }
+}
+
+pub(crate) trait TerminalLauncher {
+    fn open(&self, path: &Path, app: crate::domain::TerminalApp) -> Result<(), String>;
+}
+
+pub(crate) fn open_repository_in_terminal(
+    inspector: &dyn RepositoryInspector,
+    launcher: &dyn TerminalLauncher,
+    request: crate::domain::OpenRepositoryInTerminalRequest,
+) -> Result<(), String> {
+    let path = inspector
+        .normalize_path(&request.repository_id)
+        .map_err(|e| e.to_string())?;
+    if !inspector.is_git_repository(&path) {
+        return Err(format!("Path is not a git repository: {}", path.display()));
+    }
+    launcher.open(&path, request.terminal_app)
 }

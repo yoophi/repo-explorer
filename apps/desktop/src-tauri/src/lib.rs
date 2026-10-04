@@ -1,4 +1,5 @@
 mod application;
+use domain::OpenRepositoryInTerminalRequest;
 mod domain;
 mod infrastructure;
 
@@ -259,10 +260,20 @@ pub fn run() {
             list_repositories,
             scan_repositories,
             cancel_repository_scan,
+            open_repository_in_terminal,
             update_repository_metadata
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+fn open_repository_in_terminal(request: OpenRepositoryInTerminalRequest) -> Result<(), String> {
+    application::open_repository_in_terminal(
+        &infrastructure::FilesystemGitInspector,
+        &infrastructure::PlatformTerminalLauncher,
+        request,
+    )
 }
 
 #[cfg(test)]
@@ -641,6 +652,34 @@ mod tests {
                 assert_eq!(items[2].id, worktree_id);
             }
         }
+    }
+
+    #[test]
+    fn summarizes_uncommitted_git_changes() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let repository = temp_dir.path().join("repo");
+
+        run_git(temp_dir.path(), ["init", "repo"]);
+        run_git(&repository, ["config", "user.email", "test@example.com"]);
+        run_git(&repository, ["config", "user.name", "Test User"]);
+        fs::write(repository.join("README.md"), "# Repo").expect("write readme");
+        run_git(&repository, ["add", "README.md"]);
+        run_git(&repository, ["commit", "-m", "initial"]);
+
+        fs::write(repository.join("README.md"), "# Repo\n\nChanged").expect("modify readme");
+        fs::write(
+            repository.join("repo-explorer-status-fixture.txt"),
+            "fixture",
+        )
+        .expect("write fixture");
+        run_git(&repository, ["add", "repo-explorer-status-fixture.txt"]);
+
+        let status = infrastructure::git_status_summary(&repository);
+
+        assert_eq!(status.uncommitted_changes, 2);
+        assert_eq!(status.ahead, 0);
+        assert_eq!(status.behind, 0);
+        assert!(!status.has_upstream);
     }
 
     fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) {

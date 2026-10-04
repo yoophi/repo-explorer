@@ -55,6 +55,7 @@ pub(crate) struct RepositoryRecord {
     pub(crate) parent_id: Option<String>,
     pub(crate) is_worktree: bool,
     pub(crate) origin_url: Option<String>,
+    pub(crate) git_status: GitStatusSummary,
     pub(crate) readme: Option<ReadmeContent>,
     pub(crate) metadata: RepositoryMetadata,
     pub(crate) metadata_path: String,
@@ -74,6 +75,7 @@ pub(crate) struct RepositoryInspection {
     pub(crate) git_dir: Option<PathBuf>,
     pub(crate) common_git_dir: Option<PathBuf>,
     pub(crate) origin_url: Option<String>,
+    pub(crate) git_status: GitStatusSummary,
     pub(crate) readme: Option<ReadmeContent>,
     pub(crate) metadata: RepositoryMetadata,
 }
@@ -231,6 +233,7 @@ fn record_from_inspection(
         parent_id,
         is_worktree,
         origin_url: inspection.origin_url,
+        git_status: inspection.git_status,
         readme: inspection.readme,
         metadata: inspection.metadata,
         metadata_path,
@@ -330,4 +333,29 @@ fn worktree_parent_ids(inspections: &[RepositoryInspection]) -> HashMap<String, 
             Some((repository_id, parent_id.clone()))
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitStatusSummary {
+    pub(crate) uncommitted_changes: usize,
+    pub(crate) ahead: usize,
+    pub(crate) behind: usize,
+    pub(crate) has_upstream: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OpenRepositoryInTerminalRequest {
+    pub(crate) repository_id: String,
+    pub(crate) terminal_app: TerminalApp,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TerminalApp {
+    Terminal,
+    Iterm2,
+    Ghostty,
+    Wezterm,
 }

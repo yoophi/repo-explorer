@@ -7,6 +7,7 @@ use crate::domain::{
     ReadmeContent, RepositoryInspection, RepositoryMetadata, RepositoryRecord,
     RepositoryScanProgress, StreamingParentIndex, METADATA_FILE_NAME,
 };
+use crate::domain::{GitStatusSummary, TerminalApp};
 use explorer_json_store::{load_json, save_json, update_json};
 use explorer_scan_job::CancellationToken;
 use std::collections::VecDeque;
@@ -101,6 +102,7 @@ fn inspect_repositories_with_progress(
             git_dir: git_path(&repository_path, "--git-dir"),
             common_git_dir: git_path(&repository_path, "--git-common-dir"),
             origin_url: git_output(&repository_path, ["config", "--get", "remote.origin.url"]),
+            git_status: git_status_summary(&repository_path),
             readme: read_readme(&repository_path)?,
             metadata: load_repository_metadata(&repository_path)?,
             path: repository_path,
@@ -414,5 +416,99 @@ pub(crate) struct JsonMetadata;
 impl MetadataRepository for JsonMetadata {
     fn save(&self, path: &Path, metadata: &RepositoryMetadata) -> io::Result<()> {
         save_repository_metadata(path, metadata)
+    }
+}
+
+pub(crate) fn git_status_summary(repository_path: &Path) -> GitStatusSummary {
+    let uncommitted_changes = git_output(
+        repository_path,
+        ["status", "--porcelain=v1", "--untracked-files=normal"],
+    )
+    .map(|status| {
+        status
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+    })
+    .unwrap_or_default();
+
+    let Some(upstream) = git_output(
+        repository_path,
+        [
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    ) else {
+        return GitStatusSummary {
+            uncommitted_changes,
+            ..GitStatusSummary::default()
+        };
+    };
+
+    let Some((behind, ahead)) = git_output(
+        repository_path,
+        ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+    )
+    .and_then(|output| parse_ahead_behind_counts(&output)) else {
+        return GitStatusSummary {
+            uncommitted_changes,
+            has_upstream: true,
+            ..GitStatusSummary::default()
+        };
+    };
+
+    GitStatusSummary {
+        uncommitted_changes,
+        ahead,
+        behind,
+        has_upstream: !upstream.is_empty(),
+    }
+}
+
+fn parse_ahead_behind_counts(output: &str) -> Option<(usize, usize)> {
+    let mut counts = output.split_whitespace();
+    let behind = counts.next()?.parse().ok()?;
+    let ahead = counts.next()?.parse().ok()?;
+
+    Some((behind, ahead))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn open_terminal_at_path(path: &Path, terminal_app: TerminalApp) -> Result<(), String> {
+    let app_name = match terminal_app {
+        TerminalApp::Terminal => "Terminal",
+        TerminalApp::Iterm2 => "iTerm",
+        TerminalApp::Ghostty => "Ghostty",
+        TerminalApp::Wezterm => "WezTerm",
+    };
+
+    let status = Command::new("open")
+        .arg("-a")
+        .arg(app_name)
+        .arg(path)
+        .status()
+        .map_err(|error| format!("Failed to open {app_name}: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to open {app_name}: {status}"))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn open_terminal_at_path(
+    _path: &Path,
+    _terminal_app: TerminalApp,
+) -> Result<(), String> {
+    Err("Opening a selected terminal app is only supported on macOS.".into())
+}
+
+pub(crate) struct PlatformTerminalLauncher;
+impl crate::application::TerminalLauncher for PlatformTerminalLauncher {
+    fn open(&self, path: &Path, app: TerminalApp) -> Result<(), String> {
+        open_terminal_at_path(path, app)
     }
 }
