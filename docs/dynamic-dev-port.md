@@ -6,7 +6,7 @@ Tauri 개발 실행은 프론트엔드 개발 서버와 데스크톱 앱 실행�
 
 ## 적용 방식
 
-루트 `pnpm dev`는 `scripts/tauri-dev.mjs`를 실행한다. 이 스크립트는 `DEV_PORT` 또는 기본 포트 `1420`부터 사용 가능한 포트를 탐색하고, 선택된 포트를 Tauri CLI의 `--config` 옵션으로 전달한다.
+루트 `pnpm dev`는 `@yoophi/explorer-dev-tools`의 `explorer-tauri-dev`를 실행한다. 이 도구는 `DEV_PORT` 또는 기본 포트 `1420`부터 사용 가능한 포트를 탐색하고, 선택된 포트를 Tauri CLI의 `--config` 옵션으로 전달한다. `TAURI_PACKAGE=desktop`으로 workspace의 Tauri 패키지를 지정한다.
 
 선택된 포트는 다음 두 위치에 동시에 반영된다.
 
@@ -25,7 +25,7 @@ Tauri 개발 실행은 프론트엔드 개발 서버와 데스크톱 앱 실행�
 
 ```mermaid
 flowchart TD
-  A[pnpm dev 실행] --> B[scripts/tauri-dev.mjs 시작]
+  A[pnpm dev 실행] --> B[explorer-tauri-dev 시작]
   B --> C[DEV_PORT 또는 기본값 1420 결정]
   C --> D{host:port listen 가능?}
   D -- 아니오 --> E[다음 포트 검사]

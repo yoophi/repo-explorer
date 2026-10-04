@@ -1,4 +1,4 @@
-import { QueryProvider } from "@/app/providers/query";
+import { QueryProvider } from "../src/app/providers/query";
 import { type ReactNode } from "react";
 
 type StorybookProvidersProps = {

@@ -10,15 +10,19 @@ const strictPort = process.env.DEV_STRICT_PORT === "true";
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
   },
   optimizeDeps: {
-    exclude: ["@yoophi/ui"],
+    exclude: ["@yoophi/ui", "@yoophi/settings-core", "@yoophi/settings-ui"],
   },
   clearScreen: false,
   server: {
+    fs: {
+      allow: [path.resolve(__dirname, "../.."), path.resolve(__dirname, "../../../explorer-kit")],
+    },
     port,
     strictPort,
     host: host || process.env.DEV_HOST || false,

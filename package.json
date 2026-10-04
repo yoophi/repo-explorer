@@ -2,15 +2,17 @@
   "name": "repo-explorer",
   "private": true,
   "scripts": {
-    "dev": "node scripts/tauri-dev.mjs",
+    "dev": "TAURI_PACKAGE=desktop explorer-tauri-dev",
     "build": "pnpm --filter desktop build",
     "storybook": "pnpm --filter desktop storybook",
     "build-storybook": "pnpm --filter desktop build-storybook",
     "typecheck": "pnpm -r exec tsc --noEmit",
+    "test": "node --experimental-strip-types --test apps/desktop/tests/*.test.mjs",
     "tauri": "pnpm --filter desktop tauri",
-    "tauri:dev": "node scripts/tauri-dev.mjs"
+    "tauri:dev": "TAURI_PACKAGE=desktop explorer-tauri-dev"
   },
   "devDependencies": {
+    "@yoophi/explorer-dev-tools": "link:../explorer-kit/packages/dev-tools",
     "typescript": "~5.8.3"
   }
 }

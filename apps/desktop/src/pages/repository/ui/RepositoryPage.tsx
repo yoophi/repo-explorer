@@ -5,6 +5,7 @@ import {
   BookOpen,
   Check,
   ChevronRight,
+  X,
   FileJson,
   FolderGit2,
   GitBranch,
@@ -12,15 +13,32 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSettings } from "@yoophi/settings-core/react";
+import { SettingsField, SettingsSection, SettingsStatus } from "@yoophi/settings-ui";
 import { Button } from "@yoophi/ui/components/button";
 import {
+  defaultRepoPreferences,
+  parseMaxDepthDraft,
+  planMaxDepthCommit,
+  repoPreferencesStore,
+  syncMaxDepthDraft,
+} from "@/entities/preferences";
+import {
   getAppInfo,
+  cancelRepositoryScan,
+  ScanSession,
+  installScanSubscriptions,
+  displayedRepositories,
+  discardPreview,
   listRepositories,
   scanRepositories,
   updateRepositoryMetadata,
   type RepositoryRecord,
   type RepositoryScanProgress,
+  type RepositoryScanItem,
+  type RepositoryScanTerminal,
+  type ScanViewStatus,
 } from "@/entities/repository";
 
 type RepositoryTreeNode = {
@@ -30,8 +48,11 @@ type RepositoryTreeNode = {
 
 export function RepositoryPage() {
   const queryClient = useQueryClient();
-  const [rootPath, setRootPath] = useState("/Users/yoophi/project");
-  const [maxDepth, setMaxDepth] = useState(4);
+  const preferences = useSettings(repoPreferencesStore);
+  const { rootPath, maxDepth } = preferences.value;
+  const [maxDepthDraft, setMaxDepthDraft] = useState(() => String(maxDepth));
+  const [depthError, setDepthError] = useState<string | null>(null);
+  const maxDepthDirtyRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [expandedRepositoryIds, setExpandedRepositoryIds] = useState<Set<string>>(() => new Set());
@@ -39,6 +60,14 @@ export function RepositoryPage() {
   const [tagsText, setTagsText] = useState("");
   const [pinned, setPinned] = useState(false);
   const [scanProgress, setScanProgress] = useState<RepositoryScanProgress | null>(null);
+  const [scanTerminal, setScanTerminal] = useState<RepositoryScanTerminal | null>(null);
+  const [scanStatus, setScanStatus] = useState<ScanViewStatus>("idle");
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [previewRepositories, setPreviewRepositories] = useState<RepositoryRecord[]>([]);
+  const previewItemsRef = useRef(new Map<string, RepositoryRecord>());
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [listenerReady, setListenerReady] = useState(false);
+  const scanSessionRef = useRef<ScanSession | null>(null);
 
   const appInfoQuery = useQuery({
     queryKey: ["app-info"],
@@ -48,32 +77,13 @@ export function RepositoryPage() {
     queryKey: ["repositories"],
     queryFn: listRepositories,
   });
-  const repositories = repositoriesQuery.data ?? [];
+  const repositories = displayedRepositories(repositoriesQuery.data ?? [], previewRepositories, scanStatus);
   const selectedRepository = useMemo(
     () => repositories.find((repository) => repository.id === selectedRepositoryId) ?? null,
     [repositories, selectedRepositoryId],
   );
   const tree = useMemo(() => buildRepositoryTree(repositories, searchQuery), [repositories, searchQuery]);
   const visibleRepositoryIds = useMemo(() => collectTreeIds(tree), [tree]);
-  const scanMutation = useMutation({
-    mutationFn: () => {
-      queryClient.setQueryData(["repositories"], []);
-      setSelectedRepositoryId(null);
-      setScanProgress({
-        phase: "started",
-        currentPath: rootPath,
-        visitedDirectories: 0,
-        discoveredRepositories: 0,
-        message: "Starting repository scan",
-      });
-      return scanRepositories({ rootPath, maxDepth });
-    },
-    onSuccess: (repositories) => {
-      queryClient.setQueryData(["repositories"], repositories);
-      setExpandedRepositoryIds(new Set(repositories.map((repository) => repository.id)));
-      setSelectedRepositoryId((currentId) => currentId ?? repositories[0]?.id ?? null);
-    },
-  });
   const updateMetadataMutation = useMutation({
     mutationFn: () =>
       updateRepositoryMetadata({
@@ -93,26 +103,148 @@ export function RepositoryPage() {
   });
 
   useEffect(() => {
-    let mounted = true;
-    let unlisten: (() => void) | undefined;
+    setMaxDepthDraft((draft) => syncMaxDepthDraft(draft, maxDepthDirtyRef.current, maxDepth));
+  }, [maxDepth]);
 
-    void listen<RepositoryScanProgress>("repository_scan_progress", (event) => {
-      if (mounted) {
-        setScanProgress(event.payload);
+  function commitMaxDepth(): number | null {
+    const confirmed = repoPreferencesStore.getSnapshot().value.maxDepth;
+    const { value, needsWrite } = planMaxDepthCommit(maxDepthDraft, maxDepthDirtyRef.current, confirmed);
+    if (value === null) {
+      setDepthError("Max depth must be an integer from 0 to 20.");
+      return null;
+    }
+    setDepthError(null);
+    if (needsWrite && !repoPreferencesStore.update((current) => ({ ...current, maxDepth: value }))) {
+      return null;
+    }
+    maxDepthDirtyRef.current = false;
+    setMaxDepthDraft(String(value));
+    return value;
+  }
+
+  function resetPreferences() {
+    if (!repoPreferencesStore.reset()) return;
+    maxDepthDirtyRef.current = false;
+    setMaxDepthDraft(String(defaultRepoPreferences.maxDepth));
+    setDepthError(null);
+  }
+
+  useEffect(() => {
+    let active = true;
+    let unsubscribeAll = () => {};
+    const clearPreview = () => {
+      if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+      setPreviewRepositories(discardPreview(previewItemsRef.current));
+    };
+    setListenerReady(false);
+    setScanStatus("idle");
+    setScanError(null);
+    setScanProgress(null);
+    setScanTerminal(null);
+    clearPreview();
+    const session = new ScanSession(
+      { start: scanRepositories, cancel: cancelRepositoryScan },
+      {
+        onProgress: setScanProgress,
+        onItem: ({ repository }) => {
+          previewItemsRef.current.set(repository.id, repository);
+          if (previewTimerRef.current === null) {
+            previewTimerRef.current = setTimeout(() => {
+              previewTimerRef.current = null;
+              if (active) setPreviewRepositories([...previewItemsRef.current.values()]);
+            }, 50);
+          }
+        },
+        onTerminal: (terminal) => {
+          clearPreview();
+          setScanStatus("idle");
+          setScanTerminal(terminal);
+          if (terminal.status === "completed" && terminal.repositories) {
+            queryClient.setQueryData(["repositories"], terminal.repositories);
+            setExpandedRepositoryIds(new Set(terminal.repositories.map((repository) => repository.id)));
+            setSelectedRepositoryId((currentId) => currentId ?? terminal.repositories?.[0]?.id ?? null);
+          } else {
+            if (terminal.status === "failed") setScanError(terminal.error ?? "Repository scan failed");
+            void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+          }
+        },
+        onStartError: (error) => {
+          clearPreview();
+          setScanStatus("idle");
+          setScanError(String(error));
+          void queryClient.invalidateQueries({ queryKey: ["repositories"] });
+        },
+        onCancelError: (error) => {
+          setScanStatus("running");
+          setScanError(`Could not cancel scan: ${String(error)}`);
+        },
+      },
+    );
+    const subscriptions = installScanSubscriptions([
+      listen<RepositoryScanProgress>("repository_scan_progress", (event) => session.progress(event.payload)),
+      listen<RepositoryScanItem>("repository_scan_item", (event) => session.item(event.payload)),
+      listen<RepositoryScanTerminal>("repository_scan_terminal", (event) => session.terminal(event.payload)),
+    ], () => active);
+    void subscriptions.then((release) => {
+      unsubscribeAll = release;
+      if (active) {
+        scanSessionRef.current = session;
+        setListenerReady(true);
       }
-    }).then((unsubscribe) => {
-      if (mounted) {
-        unlisten = unsubscribe;
-      } else {
-        unsubscribe();
-      }
+    }).catch((error: unknown) => {
+      if (!active) return;
+      active = false;
+      session.dispose();
+      scanSessionRef.current = null;
+      unsubscribeAll();
+      clearPreview();
+      setScanError(`Could not subscribe to scan events: ${String(error)}`);
     });
 
     return () => {
-      mounted = false;
-      unlisten?.();
+      active = false;
+      session.dispose();
+      if (scanSessionRef.current === session) scanSessionRef.current = null;
+      unsubscribeAll();
+      if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+      discardPreview(previewItemsRef.current);
     };
-  }, []);
+  }, [queryClient]);
+
+  function startScan() {
+    const session = scanSessionRef.current;
+    if (!session || !listenerReady) return;
+    const depth = commitMaxDepth();
+    if (depth === null) return;
+    const scanId = crypto.randomUUID();
+    if (!session.start({ scanId, rootPath: repoPreferencesStore.getSnapshot().value.rootPath, maxDepth: depth })) return;
+    setScanStatus("running");
+    setScanError(null);
+    setScanTerminal(null);
+    if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = null;
+    setPreviewRepositories(discardPreview(previewItemsRef.current));
+    setSelectedRepositoryId(null);
+    setScanProgress({
+      scanId,
+      phase: "started",
+      currentPath: rootPath,
+      visitedDirectories: 0,
+      discoveredRepositories: 0,
+      message: "Starting repository scan",
+    });
+  }
+
+  function cancelScan() {
+    if (scanSessionRef.current?.cancel()) {
+      if (previewTimerRef.current !== null) clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+      setPreviewRepositories(discardPreview(previewItemsRef.current));
+      setScanStatus("cancelling");
+    }
+  }
 
   useEffect(() => {
     if (!selectedRepository && repositories[0]) {
@@ -155,7 +287,7 @@ export function RepositoryPage() {
     });
 
     if (typeof selectedPath === "string") {
-      setRootPath(selectedPath);
+      repoPreferencesStore.update((current) => ({ ...current, rootPath: selectedPath }));
     }
   }
 
@@ -172,7 +304,6 @@ export function RepositoryPage() {
     });
   }
 
-  const scanError = scanMutation.error instanceof Error ? scanMutation.error.message : null;
   const listError =
     repositoriesQuery.error instanceof Error ? repositoriesQuery.error.message : null;
   const updateError =
@@ -187,41 +318,69 @@ export function RepositoryPage() {
             Repo Explorer
           </div>
 
-          <div className="mt-4 grid gap-3">
-            <label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="root-path">
-              Directory
-              <div className="flex gap-2">
-                <input
-                  id="root-path"
-                  className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  value={rootPath}
-                  onChange={(event) => setRootPath(event.target.value)}
-                />
-                <Button variant="outline" size="icon" onClick={() => void selectRootDirectory()}>
-                  <FolderGit2 className="size-4" />
-                </Button>
-              </div>
-            </label>
+          <SettingsSection
+            title="Scan settings"
+            className="mt-4"
+            actions={<Button variant="ghost" size="sm" onClick={resetPreferences}>Reset settings</Button>}
+          >
+            <SettingsField label="Directory">
+              {(field) => (
+                <div className="flex gap-2">
+                  <input
+                    {...field}
+                    className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    value={rootPath}
+                    onChange={(event) => {
+                      repoPreferencesStore.update((current) => ({ ...current, rootPath: event.target.value }));
+                    }}
+                  />
+                  <Button variant="outline" size="icon" onClick={() => void selectRootDirectory()}>
+                    <FolderGit2 className="size-4" />
+                  </Button>
+                </div>
+              )}
+            </SettingsField>
 
             <div className="flex items-end gap-2">
-              <label className="grid flex-1 gap-1 text-xs font-medium text-muted-foreground" htmlFor="max-depth">
-                Max depth
-                <input
-                  id="max-depth"
-                  className="h-8 rounded-md border bg-background px-2 text-sm font-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                  min={0}
-                  max={20}
-                  type="number"
-                  value={maxDepth}
-                  onChange={(event) => setMaxDepth(Number(event.target.value))}
-                />
-              </label>
-              <Button disabled={!rootPath || scanMutation.isPending} onClick={() => scanMutation.mutate()}>
+              <div className="flex-1">
+                <SettingsField label="Max depth">
+                  {(field) => (
+                    <input
+                      {...field}
+                      className="h-8 w-full rounded-md border bg-background px-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      min={0}
+                      max={20}
+                      step={1}
+                      type="number"
+                      value={maxDepthDraft}
+                      onChange={(event) => {
+                        maxDepthDirtyRef.current = true;
+                        setMaxDepthDraft(event.target.value);
+                        setDepthError(null);
+                      }}
+                      onBlur={() => {
+                        if (maxDepthDirtyRef.current) commitMaxDepth();
+                        else setMaxDepthDraft(String(repoPreferencesStore.getSnapshot().value.maxDepth));
+                      }}
+                    />
+                  )}
+                </SettingsField>
+              </div>
+              <Button disabled={!rootPath || parseMaxDepthDraft(maxDepthDraft) === null || !listenerReady || scanStatus !== "idle"} onClick={startScan}>
                 <Search className="size-4" />
                 Scan
               </Button>
+              {scanStatus !== "idle" ? (
+                <Button variant="outline" disabled={scanStatus === "cancelling"} onClick={cancelScan}>
+                  <X className="size-4" />
+                  Cancel
+                </Button>
+              ) : null}
             </div>
+            <SettingsStatus error={preferences.error ?? depthError} />
+          </SettingsSection>
 
+          <div className="mt-4 grid gap-3">
             <label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="repo-search">
               Search
               <input
@@ -235,14 +394,14 @@ export function RepositoryPage() {
 
             {scanError ? <div className="text-xs text-red-600">{scanError}</div> : null}
             {scanProgress ? (
-              <ScanProgressPanel progress={scanProgress} isScanning={scanMutation.isPending} />
+              <ScanProgressPanel progress={scanProgress} status={scanStatus} terminal={scanTerminal} />
             ) : null}
           </div>
         </div>
 
         <div className="flex items-center justify-between border-b px-4 py-2">
           <span className="text-xs font-medium text-muted-foreground">
-            {visibleRepositoryIds.size} shown / {repositories.length} repos
+            {visibleRepositoryIds.size} shown / {repositories.length} repos{scanStatus === "running" ? " · Preview" : ""}
           </span>
           <Button
             variant="ghost"
@@ -298,6 +457,7 @@ export function RepositoryPage() {
               tagsText={tagsText}
               updateError={updateError}
               updatePending={updateMetadataMutation.isPending}
+              preview={scanStatus === "running"}
               onDescriptionChange={setDescription}
               onPinnedChange={setPinned}
               onSave={() => updateMetadataMutation.mutate()}
@@ -315,19 +475,21 @@ export function RepositoryPage() {
 }
 
 function ScanProgressPanel({
-  isScanning,
   progress,
+  status,
+  terminal,
 }: {
-  isScanning: boolean;
   progress: RepositoryScanProgress;
+  status: "idle" | "running" | "cancelling";
+  terminal: RepositoryScanTerminal | null;
 }) {
   return (
     <div className="rounded-md border bg-background p-3 text-xs">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium">
-          {isScanning || progress.phase !== "finished" ? "Scanning repositories" : "Scan complete"}
+          {terminal?.status === "completed" ? "Scan complete" : status === "cancelling" ? "Cancelling scan" : status === "idle" ? "Scan stopped" : "Scanning repositories"}
         </span>
-        <span className="rounded-sm bg-secondary px-1.5 py-0.5">{progress.phase}</span>
+        <span className="rounded-sm bg-secondary px-1.5 py-0.5">{terminal?.status ?? progress.phase}</span>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-muted-foreground">
         <div>Visited: {progress.visitedDirectories}</div>
@@ -348,6 +510,7 @@ function RepositoryDetail({
   tagsText,
   updateError,
   updatePending,
+  preview,
   onDescriptionChange,
   onPinnedChange,
   onSave,
@@ -359,6 +522,7 @@ function RepositoryDetail({
   tagsText: string;
   updateError: string | null;
   updatePending: boolean;
+  preview: boolean;
   onDescriptionChange: (description: string) => void;
   onPinnedChange: (pinned: boolean) => void;
   onSave: () => void;
@@ -375,6 +539,7 @@ function RepositoryDetail({
           ) : null}
         </div>
         <div className="mt-1 break-all text-sm text-muted-foreground">{repository.path}</div>
+        {preview ? <div className="mt-2 text-xs text-muted-foreground">Scan preview · metadata editing is available after completion.</div> : null}
         {repository.originUrl ? (
           <div className="mt-2 flex items-center gap-2 break-all text-sm">
             <GitBranch className="size-4 shrink-0" />
@@ -395,6 +560,7 @@ function RepositoryDetail({
         <label className="grid gap-1 text-sm font-medium">
           Description
           <textarea
+            disabled={preview}
             className="min-h-24 resize-y rounded-md border bg-background p-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             value={description}
             onChange={(event) => onDescriptionChange(event.target.value)}
@@ -404,6 +570,7 @@ function RepositoryDetail({
         <label className="grid gap-1 text-sm font-medium">
           Tags
           <input
+            disabled={preview}
             className="h-8 rounded-md border bg-background px-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
             placeholder="client, archived, infra"
             value={tagsText}
@@ -414,6 +581,7 @@ function RepositoryDetail({
         <label className="flex items-center gap-2 text-sm">
           <input
             checked={pinned}
+            disabled={preview}
             className="size-4"
             type="checkbox"
             onChange={(event) => onPinnedChange(event.target.checked)}
@@ -424,7 +592,7 @@ function RepositoryDetail({
         {updateError ? <div className="text-xs text-red-600">{updateError}</div> : null}
 
         <div>
-          <Button disabled={updatePending} onClick={onSave}>
+          <Button disabled={updatePending || preview} onClick={onSave}>
             <Check className="size-4" />
             Save metadata
           </Button>

@@ -18,6 +18,8 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@yoophi/ui": "workspace:*",
+    "@yoophi/settings-core": "link:../../../explorer-kit/packages/settings-core",
+    "@yoophi/settings-ui": "link:../../../explorer-kit/packages/settings-ui",
     "lucide-react": "^1.17.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

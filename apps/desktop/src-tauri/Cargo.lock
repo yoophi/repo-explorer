@@ -930,6 +930,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "explorer-json-store"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "explorer-scan-job"
+version = "0.1.0"
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2681,8 +2694,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 name = "repo-explorer"
 version = "0.1.0"
 dependencies = [
+ "explorer-json-store",
+ "explorer-scan-job",
  "serde",
- "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

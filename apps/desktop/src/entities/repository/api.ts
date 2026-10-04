@@ -31,17 +31,33 @@ export type RepositoryRecord = {
 };
 
 export type ScanRepositoriesRequest = {
+  scanId: string;
   rootPath: string;
   maxDepth?: number;
 };
 
 export type RepositoryScanProgress = {
-  phase: "started" | "scanning" | "found" | "inspecting" | "finished";
+  scanId: string;
+  phase: "started" | "scanning" | "found" | "inspecting";
   currentPath: string | null;
   visitedDirectories: number;
   discoveredRepositories: number;
   message: string | null;
 };
+
+export type RepositoryScanItem = {
+  scanId: string;
+  repository: RepositoryRecord;
+};
+
+export type RepositoryScanTerminal = {
+  scanId: string;
+  status: "completed" | "cancelled" | "failed";
+  repositories: RepositoryRecord[] | null;
+  error: string | null;
+};
+
+export type ScanAcknowledgement = { scanId: string };
 
 export type UpdateRepositoryMetadataRequest = {
   repositoryId: string;
@@ -59,7 +75,11 @@ export function listRepositories() {
 }
 
 export function scanRepositories(request: ScanRepositoriesRequest) {
-  return invoke<RepositoryRecord[]>("scan_repositories", { request });
+  return invoke<ScanAcknowledgement>("scan_repositories", { request });
+}
+
+export function cancelRepositoryScan(scanId: string) {
+  return invoke<boolean>("cancel_repository_scan", { scanId });
 }
 
 export function updateRepositoryMetadata(request: UpdateRepositoryMetadataRequest) {
