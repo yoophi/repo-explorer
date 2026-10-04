@@ -83,3 +83,7 @@ Rust `src-tauri/src/lib.rs`는 Tauri command, 이벤트, 스캔 등록·취소�
 - [공통 코드 기능 리뷰와 미해결 항목](../explorer-kit/docs/shared-code-review.md)
 
 문서 기준: 2026-10-05 로컬 구현. 아키텍처 리뷰의 개선 권고와 공통 기능 후보는 완료된 구현과 구분합니다.
+
+## 잔여 공통화 정리
+
+로컬 UI의 테마와 cn 경로는 ui-radix의 호환 테마·유틸리티를 재수출합니다. Git/worktree 검사와 catalog 확정·터미널 실행 정책은 앱에 남깁니다. 상세 선정·검증·유지 근거는 [공통화 보고서](../explorer-kit/docs/residual-commonality-report.md)를 참고하세요.
