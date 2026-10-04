@@ -6,7 +6,6 @@ import {
   BookOpen,
   Check,
   ChevronRight,
-  X,
   Copy,
   FileJson,
   FolderOpen,
@@ -20,14 +19,14 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSettings } from "@yoophi/settings-core/react";
+import { createSettingsDraft, editSettingsDraft, syncSettingsDraft, planSettingsDraft, confirmSettingsDraft } from "@yoophi/settings-core";
+import { ScanStatusPanel } from "@yoophi/ui-base/components/scan-status-panel";
 import { SettingsField, SettingsSection, SettingsStatus } from "@yoophi/settings-ui";
 import { Button } from "@yoophi/ui/components/button";
 import {
   defaultRepoPreferences,
   parseMaxDepthDraft,
-  planMaxDepthCommit,
   repoPreferencesStore,
-  syncMaxDepthDraft,
 } from "@/entities/preferences";
 import {
   getAppInfo,
@@ -40,6 +39,7 @@ import {
   openRepositoryInFinder,
   openRepositoryInTerminal,
   scanRepositories,
+  selectVisibleRepository,
   updateRepositoryMetadata,
   type RepositoryRecord,
   type RepositoryScanProgress,
@@ -66,9 +66,10 @@ export function RepositoryPage() {
   const queryClient = useQueryClient();
   const preferences = useSettings(repoPreferencesStore);
   const { rootPath, maxDepth } = preferences.value;
-  const [maxDepthDraft, setMaxDepthDraft] = useState(() => String(maxDepth));
+  const [depthDraft, setDepthDraft] = useState(() => createSettingsDraft(maxDepth, String));
+  const depthDraftRef = useRef(depthDraft);
+  const maxDepthDraft = depthDraft.text;
   const [depthError, setDepthError] = useState<string | null>(null);
-  const maxDepthDirtyRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [expandedRepositoryIds, setExpandedRepositoryIds] = useState<Set<string>>(() => new Set());
@@ -123,12 +124,18 @@ export function RepositoryPage() {
   });
 
   useEffect(() => {
-    setMaxDepthDraft((draft) => syncMaxDepthDraft(draft, maxDepthDirtyRef.current, maxDepth));
+    updateDepthDraft(syncSettingsDraft(depthDraftRef.current, maxDepth, String));
   }, [maxDepth]);
+
+  function updateDepthDraft(next: typeof depthDraft) {
+    depthDraftRef.current = next;
+    setDepthDraft(next);
+  }
 
   function commitMaxDepth(): number | null {
     const confirmed = repoPreferencesStore.getSnapshot().value.maxDepth;
-    const { value, needsWrite } = planMaxDepthCommit(maxDepthDraft, maxDepthDirtyRef.current, confirmed);
+    const current = syncSettingsDraft(depthDraftRef.current, confirmed, String);
+    const { value, needsWrite } = planSettingsDraft(current, parseMaxDepthDraft);
     if (value === null) {
       setDepthError("Max depth must be an integer from 0 to 20.");
       return null;
@@ -137,15 +144,13 @@ export function RepositoryPage() {
     if (needsWrite && !repoPreferencesStore.update((current) => ({ ...current, maxDepth: value }))) {
       return null;
     }
-    maxDepthDirtyRef.current = false;
-    setMaxDepthDraft(String(value));
+    updateDepthDraft(confirmSettingsDraft(current, value, String));
     return value;
   }
 
   function resetPreferences() {
     if (!repoPreferencesStore.reset()) return;
-    maxDepthDirtyRef.current = false;
-    setMaxDepthDraft(String(defaultRepoPreferences.maxDepth));
+    updateDepthDraft(createSettingsDraft(defaultRepoPreferences.maxDepth, String));
     setDepthError(null);
   }
 
@@ -267,12 +272,6 @@ export function RepositoryPage() {
   }
 
   useEffect(() => {
-    if (!selectedRepository && repositories[0]) {
-      setSelectedRepositoryId(repositories[0].id);
-    }
-  }, [repositories, selectedRepository]);
-
-  useEffect(() => {
     setRepositoryActionError(null);
     setRepositoryActionPending(null);
     setRepositoryCopyMessage(null);
@@ -280,12 +279,9 @@ export function RepositoryPage() {
   }, [selectedRepositoryId]);
 
   useEffect(() => {
-    if (!selectedRepositoryId || visibleRepositoryIds.has(selectedRepositoryId)) {
-      return;
-    }
-
-    setSelectedRepositoryId(visibleRepositoryIds.values().next().value ?? null);
-  }, [selectedRepositoryId, visibleRepositoryIds]);
+    const orderedVisibleIds = [...visibleRepositoryIds];
+    setSelectedRepositoryId((current) => selectVisibleRepository(current, repositories, orderedVisibleIds));
+  }, [repositories, visibleRepositoryIds]);
 
   useEffect(() => {
     if (!selectedRepository) {
@@ -429,13 +425,12 @@ export function RepositoryPage() {
                       type="number"
                       value={maxDepthDraft}
                       onChange={(event) => {
-                        maxDepthDirtyRef.current = true;
-                        setMaxDepthDraft(event.target.value);
+                        updateDepthDraft(editSettingsDraft(depthDraftRef.current, event.target.value, String));
                         setDepthError(null);
                       }}
                       onBlur={() => {
-                        if (maxDepthDirtyRef.current) commitMaxDepth();
-                        else setMaxDepthDraft(String(repoPreferencesStore.getSnapshot().value.maxDepth));
+                        if (depthDraftRef.current.dirty) commitMaxDepth();
+                        else updateDepthDraft(syncSettingsDraft(depthDraftRef.current, repoPreferencesStore.getSnapshot().value.maxDepth, String));
                       }}
                     />
                   )}
@@ -445,12 +440,6 @@ export function RepositoryPage() {
                 <Search className="size-4" />
                 Scan
               </Button>
-              {scanStatus !== "idle" ? (
-                <Button variant="outline" disabled={scanStatus === "cancelling"} onClick={cancelScan}>
-                  <X className="size-4" />
-                  Cancel
-                </Button>
-              ) : null}
             </div>
             <SettingsStatus error={preferences.error ?? depthError} />
           </SettingsSection>
@@ -469,7 +458,14 @@ export function RepositoryPage() {
 
             {scanError ? <div className="text-xs text-red-600">{scanError}</div> : null}
             {scanProgress ? (
-              <ScanProgressPanel progress={scanProgress} status={scanStatus} terminal={scanTerminal} />
+              <ScanProgressPanel
+                progress={scanProgress}
+                status={scanStatus}
+                terminal={scanTerminal}
+                onCancel={cancelScan}
+                onRetry={startScan}
+                retryDisabled={!rootPath || parseMaxDepthDraft(maxDepthDraft) === null || !listenerReady}
+              />
             ) : null}
           </div>
         </div>
@@ -564,28 +560,32 @@ function ScanProgressPanel({
   progress,
   status,
   terminal,
+  onCancel,
+  onRetry,
+  retryDisabled,
 }: {
   progress: RepositoryScanProgress;
   status: "idle" | "running" | "cancelling";
   terminal: RepositoryScanTerminal | null;
+  onCancel: () => void;
+  onRetry: () => void;
+  retryDisabled: boolean;
 }) {
   return (
-    <div className="rounded-md border bg-background p-3 text-xs">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">
-          {terminal?.status === "completed" ? "Scan complete" : status === "cancelling" ? "Cancelling scan" : status === "idle" ? "Scan stopped" : "Scanning repositories"}
-        </span>
-        <span className="rounded-sm bg-secondary px-1.5 py-0.5">{terminal?.status ?? progress.phase}</span>
-      </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-muted-foreground">
-        <div>Visited: {progress.visitedDirectories}</div>
-        <div>Found: {progress.discoveredRepositories}</div>
-      </div>
-      {progress.currentPath ? (
-        <div className="mt-2 break-all text-muted-foreground">{progress.currentPath}</div>
-      ) : null}
-      {progress.message ? <div className="mt-2 text-muted-foreground">{progress.message}</div> : null}
-    </div>
+    <ScanStatusPanel
+      className="text-xs"
+      phase={terminal?.status === "completed" ? "Scan complete" : status === "cancelling" ? "Cancelling scan" : status === "idle" ? "Scan stopped" : "Scanning repositories"}
+      status={terminal?.status ?? progress.phase}
+      counts={[{ key: "visited", label: "Visited", value: progress.visitedDirectories }, { key: "found", label: "Found", value: progress.discoveredRepositories }]}
+      path={progress.currentPath}
+      message={progress.message}
+      onCancel={status === "idle" ? undefined : onCancel}
+      cancelDisabled={status === "cancelling"}
+      cancelLabel="Cancel"
+      onRetry={status === "idle" ? onRetry : undefined}
+      retryDisabled={retryDisabled}
+      retryLabel="Scan again"
+    />
   );
 }
 

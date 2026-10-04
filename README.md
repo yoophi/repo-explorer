@@ -52,9 +52,9 @@ Git CLI가 PATH에 있어야 저장소 검사와 worktree 정보를 정상적으
 
 ## 현재 아키텍처
 
-프론트엔드는 app/pages/entities/shared 구조와 로컬 workspace UI 패키지를 사용합니다. 서버 데이터는 TanStack Query, 탐색 설정은 settings-core, 화면 초안·선택은 local state, 비동기 스캔 수명은 ScanSession이 관리합니다. preferences는 entities의 공개 index에서 제공하며, Storybook의 앱 provider 조립은 `.storybook/app.tsx`에 둡니다.
+프론트엔드는 app/pages/entities/shared 구조와 로컬 workspace UI 패키지를 사용합니다. 서버 데이터는 TanStack Query, 탐색 설정은 settings-core, 숫자 편집 초안은 settings-core의 순수 draft 함수, 스캔 수명은 scan-client의 `ScanLifecycle`을 감싼 앱 `ScanSession`이 관리합니다. 가시 저장소 선택은 collection-core의 `reconcileSelection`에 앱의 평면 목록 초기 선택 정책을 전달합니다. 진행·취소·재시도 표시는 ui-base `ScanStatusPanel`, 기존 Button API는 ui-radix의 호환 버튼을 재export합니다. preferences는 entities의 공개 index에서 제공하며, Storybook의 앱 provider 조립은 `.storybook/app.tsx`에 둡니다.
 
-Rust `src-tauri/src/lib.rs`는 Tauri command, 이벤트, 스캔 등록·취소와 catalog commit 경계를 조립합니다. `application.rs`는 Tauri와 파일 형식에 의존하지 않는 스캔·목록·메타데이터 유스케이스 및 inspector/catalog/metadata/progress port를 제공합니다. `domain.rs`에는 DTO와 순수 변환을 두고, `infrastructure.rs`가 Git·파일시스템·JSON 저장을 구현합니다. catalog 경로는 저장소 port 호출 시 해석하며 JSON 갱신은 기존 단일 update lock을 사용합니다.
+Rust `src-tauri/src/lib.rs`는 Tauri command, 이벤트, 스캔 등록·취소와 catalog commit 경계를 조립합니다. `application.rs`는 Tauri와 파일 형식에 의존하지 않는 스캔·목록·메타데이터 유스케이스 및 inspector/catalog/metadata/progress port를 제공합니다. `domain.rs`에는 DTO와 순수 변환을 두고, `infrastructure.rs`가 Git 검사·메타데이터·JSON 저장을 구현합니다. 디렉터리 순회는 fs-core의 `RepositoryBfs` 정책을 사용하고 Git 저장소 판정과 결과 DTO는 앱에 남습니다. catalog 경로는 저장소 port 호출 시 해석하며 JSON 갱신은 기존 단일 update lock을 사용합니다.
 
 | 위치 | 책임 |
 | --- | --- |
@@ -67,8 +67,8 @@ Rust `src-tauri/src/lib.rs`는 Tauri command, 이벤트, 스캔 등록·취소�
 
 ## 공통 코드 연결
 
-- 프론트엔드/개발 도구: `@yoophi/explorer-dev-tools`, `@yoophi/settings-core`, `@yoophi/settings-ui`
-- Rust: `explorer-json-store`, `explorer-scan-job`.
+- 프론트엔드/개발 도구: `@yoophi/explorer-dev-tools`, `@yoophi/settings-core`, `@yoophi/settings-ui`, `@yoophi/scan-client`, `@yoophi/collection-core`, `@yoophi/ui-base`, `@yoophi/ui-radix`
+- Rust: `explorer-json-store`, `explorer-scan-job`, `explorer-fs-core`.
 
 공통 React 컴포넌트는 앱 데이터를 props와 callback으로 받고, 앱의 Tauri·라우팅·도메인 정책은 호출부에 유지합니다. 공통 저장소 UI를 보려면 `explorer-kit`에서 `pnpm storybook`을 실행하세요. 앱별 Storybook과는 별도이며 기본 포트 6006을 사용합니다.
 

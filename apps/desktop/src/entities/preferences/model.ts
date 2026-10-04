@@ -1,4 +1,4 @@
-import { createSettingsStore, type SettingsStorage } from "@yoophi/settings-core";
+import { createSettingsStore, createSettingsDraft, editSettingsDraft, syncSettingsDraft, planSettingsDraft, type SettingsStorage } from "@yoophi/settings-core";
 
 export type RepoPreferences = { rootPath: string; maxDepth: number };
 
@@ -14,12 +14,13 @@ export function parseMaxDepthDraft(text: string): number | null {
 }
 
 export function syncMaxDepthDraft(draft: string, dirty: boolean, confirmed: number): string {
-  return dirty ? draft : String(confirmed);
+  const base = createSettingsDraft(confirmed, String);
+  return syncSettingsDraft(dirty ? editSettingsDraft(base, draft, String) : base, confirmed, String).text;
 }
 
 export function planMaxDepthCommit(draft: string, dirty: boolean, confirmed: number) {
-  const value = dirty ? parseMaxDepthDraft(draft) : confirmed;
-  return { value, needsWrite: dirty && value !== null && value !== confirmed };
+  const base = createSettingsDraft(confirmed, String);
+  return planSettingsDraft(dirty ? editSettingsDraft(base, draft, String) : base, parseMaxDepthDraft);
 }
 
 export function parseRepoPreferences(value: unknown): RepoPreferences {

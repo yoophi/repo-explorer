@@ -32,6 +32,12 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.4
+      '@yoophi/collection-core':
+        specifier: link:../../../explorer-kit/packages/collection-core
+        version: link:../../../explorer-kit/packages/collection-core
+      '@yoophi/scan-client':
+        specifier: link:../../../explorer-kit/packages/scan-client
+        version: link:../../../explorer-kit/packages/scan-client
       '@yoophi/settings-core':
         specifier: link:../../../explorer-kit/packages/settings-core
         version: link:../../../explorer-kit/packages/settings-core
@@ -41,6 +47,12 @@ importers:
       '@yoophi/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@yoophi/ui-base':
+        specifier: link:../../../explorer-kit/packages/ui-base
+        version: link:../../../explorer-kit/packages/ui-base
+      '@yoophi/ui-radix':
+        specifier: link:../../../explorer-kit/packages/ui-radix
+        version: link:../../../explorer-kit/packages/ui-radix
       lucide-react:
         specifier: ^1.17.0
         version: 1.21.0(react@19.2.7)
@@ -102,6 +114,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: ^5.2.9
         version: 5.2.9
+      '@yoophi/ui-radix':
+        specifier: link:../../../explorer-kit/packages/ui-radix
+        version: link:../../../explorer-kit/packages/ui-radix
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

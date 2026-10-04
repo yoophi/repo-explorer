@@ -2,3 +2,5 @@
 
 @source "../../../../../packages/ui/src";
 @source "../../../../../../explorer-kit/packages/settings-ui/src";
+@source "../../../../../../explorer-kit/packages/ui-radix/src";
+@source "../../../../../../explorer-kit/packages/ui-base/src";

@@ -5,6 +5,7 @@ import type {
   ScanAcknowledgement,
   ScanRepositoriesRequest,
 } from "./api";
+import { ScanLifecycle } from "@yoophi/scan-client";
 
 export type ScanTransport = {
   start: (request: ScanRepositoriesRequest) => Promise<ScanAcknowledgement>;
@@ -19,91 +20,41 @@ type Callbacks = {
   onCancelError: (error: unknown) => void;
 };
 
-type ActiveScan = {
-  id: string;
-  acknowledged: boolean;
-  cancelRequested: boolean;
-  cancelAttempt: number;
-};
-
 export class ScanSession {
-  private active: ActiveScan | null = null;
-  private disposed = false;
-  private readonly transport: ScanTransport;
+  private readonly lifecycle: ScanLifecycle<ScanRepositoriesRequest>;
   private readonly callbacks: Callbacks;
 
   constructor(transport: ScanTransport, callbacks: Callbacks) {
-    this.transport = transport;
     this.callbacks = callbacks;
+    this.lifecycle = new ScanLifecycle(transport, {
+      onStartError: callbacks.onStartError,
+      onCancelError: callbacks.onCancelError,
+    }, { cancelBeforeAcknowledgement: true });
   }
 
   start(request: ScanRepositoriesRequest): boolean {
-    if (this.disposed || this.active) return false;
-    const job: ActiveScan = {
-      id: request.scanId,
-      acknowledged: false,
-      cancelRequested: false,
-      cancelAttempt: 0,
-    };
-    this.active = job;
-    void this.transport.start(request).then((ack) => {
-      if (this.active !== job) return;
-      if (ack.scanId !== job.id) throw new Error("Scan acknowledgement ID mismatch");
-      job.acknowledged = true;
-      if (job.cancelRequested) void this.sendCancel(job);
-    }).catch((error: unknown) => {
-      if (this.active !== job) return;
-      this.active = null;
-      if (!this.disposed) this.callbacks.onStartError(error);
-    });
-    return true;
+    return this.lifecycle.start(request);
   }
 
-  cancel(): boolean {
-    const job = this.active;
-    if (!job) return false;
-    job.cancelRequested = true;
-    // This may arrive before registration. The ack path retries it.
-    void this.sendCancel(job);
-    return true;
-  }
+  cancel(): boolean { return this.lifecycle.cancel(); }
 
   progress(progress: RepositoryScanProgress): void {
-    if (!this.disposed && progress.scanId === this.active?.id) {
+    if (this.lifecycle.accepts(progress.scanId)) {
       this.callbacks.onProgress(progress);
     }
   }
 
   item(item: RepositoryScanItem): void {
-    if (!this.disposed && item.scanId === this.active?.id) {
+    if (this.lifecycle.accepts(item.scanId)) {
       this.callbacks.onItem(item);
     }
   }
 
   terminal(terminal: RepositoryScanTerminal): void {
-    if (terminal.scanId !== this.active?.id) return;
-    this.active = null;
-    if (!this.disposed) this.callbacks.onTerminal(terminal);
+    if (this.lifecycle.finish(terminal.scanId)) this.callbacks.onTerminal(terminal);
   }
 
-  dispose(): void {
-    this.disposed = true;
-    this.cancel();
-  }
-
-  private async sendCancel(job: ActiveScan): Promise<void> {
-    const attempt = ++job.cancelAttempt;
-    try {
-      await this.transport.cancel(job.id);
-    } catch (error) {
-      if (this.active !== job || attempt !== job.cancelAttempt) return;
-      if (job.acknowledged) {
-        job.cancelRequested = false;
-        if (!this.disposed) this.callbacks.onCancelError(error);
-      }
-      // Before ack, keep the request and retry after registration.
-    }
-  }
+  dispose(): void { this.lifecycle.dispose(); }
 }
 
 export async function installScanSubscriptions(

@@ -19,6 +19,7 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 explorer-json-store = { path = "../../../../explorer-kit/crates/json-store" }
 explorer-scan-job = { path = "../../../../explorer-kit/crates/scan-job" }
+explorer-fs-core = { path = "../../../../explorer-kit/crates/fs-core" }
 
 [dev-dependencies]
 tempfile = "3"

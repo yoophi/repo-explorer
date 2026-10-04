@@ -19,3 +19,4 @@ export {
 } from "./api";
 export { ScanSession, installScanSubscriptions } from "./scan-session";
 export { discardPreview, displayedRepositories, type ScanViewStatus } from "./scan-view";
+export { selectVisibleRepository } from "./selection";

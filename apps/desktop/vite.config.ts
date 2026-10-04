@@ -16,7 +16,7 @@ export default defineConfig(() => ({
     },
   },
   optimizeDeps: {
-    exclude: ["@yoophi/ui", "@yoophi/settings-core", "@yoophi/settings-ui"],
+    exclude: ["@yoophi/ui", "@yoophi/ui-base", "@yoophi/ui-radix", "@yoophi/settings-core", "@yoophi/settings-ui", "@yoophi/scan-client", "@yoophi/collection-core"],
   },
   clearScreen: false,
   server: {

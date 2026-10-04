@@ -412,6 +412,32 @@ mod tests {
     }
 
     #[test]
+    fn shared_bfs_walk_keeps_progress_order_and_depth_limit() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("a/deep/.git")).unwrap();
+        fs::create_dir_all(root.join("b/.git")).unwrap();
+        let mut scanning = Vec::new();
+        let repositories = discover_git_repositories_with_progress(root, 1, None, |progress| {
+            if progress.phase == "scanning" {
+                scanning.push((progress.current_path.unwrap(), progress.visited_directories));
+            }
+        })
+        .unwrap();
+        assert_eq!(scanning[0].0, root.to_string_lossy());
+        assert_eq!(
+            scanning.iter().map(|(_, count)| *count).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert!(scanning
+            .iter()
+            .skip(1)
+            .all(|(path, _)| path == &root.join("a").to_string_lossy()
+                || path == &root.join("b").to_string_lossy()));
+        assert_eq!(repositories, vec![root.join("b")]);
+    }
+
+    #[test]
     fn saves_and_loads_repository_metadata_in_repository_directory() {
         let temp_dir = tempdir().expect("create temp dir");
         let repository = temp_dir.path().join("repo");

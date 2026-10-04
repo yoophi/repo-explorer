@@ -8,9 +8,9 @@ use crate::domain::{
     RepositoryScanProgress, StreamingParentIndex, METADATA_FILE_NAME,
 };
 use crate::domain::{GitStatusSummary, TerminalApp};
+use explorer_fs_core::{walk_directories, WalkError, WalkPolicy};
 use explorer_json_store::{load_json, save_json, update_json};
 use explorer_scan_job::CancellationToken;
-use std::collections::VecDeque;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -131,60 +131,45 @@ pub(crate) fn discover_git_repositories_with_progress(
     mut on_progress: impl FnMut(RepositoryScanProgress),
 ) -> io::Result<Vec<PathBuf>> {
     let mut repositories = Vec::new();
-    let mut pending = VecDeque::from([(root_path.to_path_buf(), 0)]);
     let mut visited_directories = 0;
-
-    while let Some((path, depth)) = pending.pop_front() {
-        if let Some(token) = token {
-            check_cancelled(token)?;
-        }
-        visited_directories += 1;
-        on_progress(RepositoryScanProgress {
-            phase: "scanning",
-            current_path: Some(path.to_string_lossy().to_string()),
-            visited_directories,
-            discovered_repositories: repositories.len(),
-            message: None,
-        });
-
-        if is_git_repository(&path) {
-            repositories.push(path.clone());
+    let result = walk_directories(
+        root_path,
+        WalkPolicy::RepositoryBfs { max_depth },
+        &|| token.is_some_and(|token| token.is_cancelled()),
+        &should_skip_directory,
+        &mut |path, _depth| {
+            visited_directories += 1;
             on_progress(RepositoryScanProgress {
-                phase: "found",
+                phase: "scanning",
                 current_path: Some(path.to_string_lossy().to_string()),
                 visited_directories,
                 discovered_repositories: repositories.len(),
-                message: Some("Git repository found".into()),
+                message: None,
             });
-        }
 
-        if depth >= max_depth {
-            continue;
-        }
-
-        let entries = match fs::read_dir(&path) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => continue,
-            Err(error) => return Err(error),
-        };
-
-        for entry in entries {
-            if let Some(token) = token {
-                check_cancelled(token)?;
-            }
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            if !file_type.is_dir() {
-                continue;
+            if is_git_repository(&path) {
+                repositories.push(path.to_path_buf());
+                on_progress(RepositoryScanProgress {
+                    phase: "found",
+                    current_path: Some(path.to_string_lossy().to_string()),
+                    visited_directories,
+                    discovered_repositories: repositories.len(),
+                    message: Some("Git repository found".into()),
+                });
             }
 
-            let child_path = entry.path();
-            if should_skip_directory(&child_path) {
-                continue;
-            }
-
-            pending.push_back((child_path, depth + 1));
+            Ok::<(), io::Error>(())
+        },
+    );
+    match result {
+        Ok(()) => {}
+        Err(WalkError::Cancelled) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Repository scan cancelled",
+            ))
         }
+        Err(WalkError::Io(error) | WalkError::Callback(error)) => return Err(error),
     }
 
     repositories.sort();
